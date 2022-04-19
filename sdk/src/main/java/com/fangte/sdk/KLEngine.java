@@ -104,6 +104,8 @@ public class KLEngine {
                 }
             } else if (mStatus == 2) {
                 nCount = 200;
+                mKLClient.SendAlive();
+                /*
                 if (mKLClient.SendAlive()) {
                     nHeartError = 0;
                 } else {
@@ -113,7 +115,7 @@ public class KLEngine {
                     nCount = 1;
                     mStatus = 0;
                     mKLClient.stop();
-                }
+                }*/
             }
 
             for (int i = 0; i < nCount; i++) {
