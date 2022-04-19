@@ -14,13 +14,7 @@ public class KLBase {
     public static final int SEND_BIZ_UNPUB = 10011;
     // 拉流
     public static final int SEND_BIZ_SUB = 10015;
-    public static final int SEND_BIZ_UPSUB = 10016;
-    public static final int SEND_BIZ_UNSUB = 10017;
-
-    // WS连接回调
-    public static final int SOCKET_EVENT_CONNECT = 1000;
-    public static final int SOCKET_EVENT_UNCONNECT = 1001;
-    public static final int SOCKET_EVENT_ERROR = 1002;
+    public static final int SEND_BIZ_UNSUB = 10016;
 
     // 信令服务器地址
     static String SERVER_IP = "120.238.78.213";

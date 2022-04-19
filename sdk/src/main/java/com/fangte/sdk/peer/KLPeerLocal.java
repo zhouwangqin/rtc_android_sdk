@@ -24,7 +24,6 @@ import static com.fangte.sdk.KLBase.AUDIO_ECHO_CANCELLATION_CONSTRAINT;
 import static com.fangte.sdk.KLBase.AUDIO_HIGH_PASS_FILTER_CONSTRAINT;
 import static com.fangte.sdk.KLBase.AUDIO_NOISE_SUPPRESSION_CONSTRAINT;
 import static com.fangte.sdk.KLBase.AUDIO_TRACK_ID;
-import static com.fangte.sdk.KLEngine.mExecutor;
 import static org.webrtc.SessionDescription.Type.ANSWER;
 
 public class KLPeerLocal {
@@ -77,9 +76,10 @@ public class KLPeerLocal {
         PeerConnection.RTCConfiguration rtcConfig = new PeerConnection.RTCConfiguration(mKLEngine.iceServers);
         rtcConfig.disableIpv6 = true;
         rtcConfig.enableDtlsSrtp = true;
-        rtcConfig.tcpCandidatePolicy = PeerConnection.TcpCandidatePolicy.DISABLED;
         rtcConfig.bundlePolicy = PeerConnection.BundlePolicy.MAXBUNDLE;
         rtcConfig.sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN;
+        rtcConfig.tcpCandidatePolicy = PeerConnection.TcpCandidatePolicy.DISABLED;
+        rtcConfig.continualGatheringPolicy =  PeerConnection.ContinualGatheringPolicy.GATHER_CONTINUALLY;
         mPeerConnection = mKLEngine.mPeerConnectionFactory.createPeerConnection(rtcConfig, pcObserver);
         // 添加Track
         List<String> mediaStreamLabels = Collections.singletonList("ARDAMS");
@@ -131,7 +131,7 @@ public class KLPeerLocal {
         if (bClose) {
             return;
         }
-        mExecutor.execute(() -> {
+        new Thread(() -> {
             if (mKLEngine != null && mKLEngine.mKLClient != null && sdp != null) {
                 if (mKLEngine.mKLClient.SendPublish(sdp.description, true, false, 0)) {
                     nLive = 2;
@@ -143,15 +143,11 @@ public class KLPeerLocal {
                     return;
                 }
             }
-
             if (bClose) {
                 return;
             }
             nLive = 0;
-            if (mKLEngine != null) {
-                mKLEngine.OnPeerPublish(false, "KLPeerLocal send publish fail");
-            }
-        });
+        }).start();
     }
 
     // 取消推流
@@ -159,11 +155,11 @@ public class KLPeerLocal {
         if (strMid.equals("")) {
             return;
         }
-        mExecutor.execute(() -> {
+        new Thread(() -> {
             mKLEngine.mKLClient.SendUnpublish(strMid, sfuId);
             strMid = "";
             sfuId = "";
-        });
+        }).start();
     }
 
     // 设置本地offer sdp回调处理
@@ -204,40 +200,10 @@ public class KLPeerLocal {
                 nLive = 4;
             }
             if (newState == PeerConnection.PeerConnectionState.DISCONNECTED) {
-                if (bClose) {
-                    return;
-                }
-                if (nLive != 0) {
-                    if (nLive == 4) {
-                        if (mKLEngine != null) {
-                            mKLEngine.OnPeerPublishError();
-                        }
-                    }
-                    if (nLive != 4) {
-                        if (mKLEngine != null) {
-                            mKLEngine.OnPeerPublish(false, "KLPeerLocal ice disconnect");
-                        }
-                    }
-                    nLive = 0;
-                }
+                nLive = 0;
             }
             if (newState == PeerConnection.PeerConnectionState.FAILED) {
-                if (bClose) {
-                    return;
-                }
-                if (nLive != 0) {
-                    if (nLive == 4) {
-                        if (mKLEngine != null) {
-                            mKLEngine.OnPeerPublishError();
-                        }
-                    }
-                    if (nLive != 4) {
-                        if (mKLEngine != null) {
-                            mKLEngine.OnPeerPublish(false, "KLPeerLocal ice fail");
-                        }
-                    }
-                    nLive = 0;
-                }
+                nLive = 0;
             }
         }
 
@@ -323,25 +289,13 @@ public class KLPeerLocal {
         @Override
         public void onCreateFailure(final String error) {
             KLLog.e("KLPeerLocal create offer sdp fail = " + error);
-            if (bClose) {
-                return;
-            }
             nLive = 0;
-            if (mKLEngine != null) {
-                mKLEngine.OnPeerPublish(false, error);
-            }
         }
 
         @Override
         public void onSetFailure(final String error) {
             KLLog.e("KLPeerLocal offer sdp set error = " + error);
-            if (bClose) {
-                return;
-            }
             nLive = 0;
-            if (mKLEngine != null) {
-                mKLEngine.OnPeerPublish(false, error);
-            }
         }
     }
 
@@ -355,13 +309,7 @@ public class KLPeerLocal {
         @Override
         public void onSetSuccess() {
             KLLog.e("KLPeerLocal set remote sdp ok");
-            if (bClose) {
-                return;
-            }
             nLive = 3;
-            if (mKLEngine != null) {
-                mKLEngine.OnPeerPublish(true, "");
-            }
         }
 
         @Override
@@ -372,13 +320,7 @@ public class KLPeerLocal {
         @Override
         public void onSetFailure(final String error) {
             KLLog.e("KLPeerLocal answer sdp set error = " + error);
-            if (bClose) {
-                return;
-            }
             nLive = 0;
-            if (mKLEngine != null) {
-                mKLEngine.OnPeerPublish(false, error);
-            }
         }
     }
 }

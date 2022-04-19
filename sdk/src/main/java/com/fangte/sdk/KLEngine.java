@@ -16,7 +16,6 @@ import org.webrtc.CallSessionFileRotatingLogSink;
 import org.webrtc.EglBase;
 import org.webrtc.HardwareVideoDecoderFactory;
 import org.webrtc.HardwareVideoEncoderFactory;
-import org.webrtc.Logging;
 import org.webrtc.PeerConnection;
 import org.webrtc.PeerConnectionFactory;
 import org.webrtc.VideoDecoderFactory;
@@ -24,30 +23,35 @@ import org.webrtc.VideoEncoderFactory;
 import org.webrtc.audio.AudioDeviceModule;
 import org.webrtc.audio.JavaAudioDeviceModule;
 
-import java.io.File;
-import java.lang.reflect.Method;
 import java.util.HashMap;
 import java.util.LinkedList;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.ReentrantLock;
 
 import static com.fangte.sdk.KLBase.SERVER_IP;
 import static com.fangte.sdk.KLBase.SERVER_PORT;
 import static com.fangte.sdk.KLBase.RELAY_SERVER_IP;
-import static com.fangte.sdk.KLBase.VIDEO_FLEXFEC_FIELDTRIAL;
 import static com.fangte.sdk.KLBase.VIDEO_VP8_INTEL_HW_ENCODER_FIELDTRIAL;
 
 public class KLEngine {
     // 基本参数
     public String strRid = "";
     public String strUid = "";
+    public String strUrl = "";
     // 上下文对象
     private Activity mContext = null;
     private Handler mHandler = null;
+    // 回调对象
+    public KLListen mKLListen = null;
+
+    // 标记
+    private int mStatus = 0;
+    private boolean bPublish  = true;
+    private boolean bRoomClose = false;
+    private boolean bSocketClose = false;
 
     // 音频设备管理
     private AppRTCAudioManager audioManager = null;
@@ -59,34 +63,141 @@ public class KLEngine {
     public PeerConnectionFactory mPeerConnectionFactory = null;
     public LinkedList<PeerConnection.IceServer> iceServers = new LinkedList<>();
     // 线程池
-    public static final ExecutorService mExecutor = Executors.newSingleThreadExecutor();
+    //public static final ExecutorService mExecutor = Executors.newSingleThreadExecutor();
 
     // 信令对象
     public KLClient mKLClient = new KLClient();
     // 推流对象
-    public KLPeerLocal klPeerLocal = new KLPeerLocal();
+    private final KLPeerLocal klPeerLocal = new KLPeerLocal();
     // 拉流对象
-    public HashMap<String, KLPeerRemote> klPeerRemoteHashMap = new HashMap<>();
-    public ReentrantLock mMapLock = new ReentrantLock();
+    private final HashMap<String, KLPeerRemote> klPeerRemoteHashMap = new HashMap<>();
+    private final ReentrantLock mMapLock = new ReentrantLock();
 
     // 心跳线程
     private int nHeartError = 0;
-    private boolean bHeart = false;
-    private final Runnable HeartThread = new Runnable() {
-        @Override
-        public void run() {
-            mExecutor.execute(() -> {
+    private boolean bHeartExit = false;
+    private final Runnable HeartThread = () -> {
+        int nCount = 1;
+        while (!bHeartExit) {
+            if (bSocketClose || bRoomClose) {
+                return;
+            }
+
+            if (mStatus == 0) {
+                nCount = 1;
+                if (mKLClient.start(strUrl)) {
+                    mStatus = 1;
+                }
+
+                if (bHeartExit || bSocketClose || bRoomClose) {
+                    return;
+                }
+            } else if (mStatus == 1) {
+                nCount = 10;
+                if (mKLClient.SendJoin()) {
+                    nCount = 200;
+                    mStatus = 2;
+                }
+
+                if (bHeartExit || bSocketClose || bRoomClose) {
+                    return;
+                }
+            } else if (mStatus == 2) {
+                nCount = 200;
                 if (mKLClient.SendAlive()) {
                     nHeartError = 0;
                 } else {
                     nHeartError++;
                 }
-                if (nHeartError == 2) {
-                    // 回调socket断开
-                    respSocketEvent();
+                if (nHeartError >= 2) {
+                    nCount = 1;
+                    mStatus = 0;
+                    mKLClient.stop();
                 }
-            });
-            mHandler.postDelayed(this, 20000);
+            }
+
+            for (int i = 0; i < nCount; i++) {
+                if (bHeartExit || bSocketClose || bRoomClose) {
+                    return;
+                }
+                try {
+                    Thread.sleep(100);
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
+            }
+        }
+    };
+
+    // 工作线程
+    private boolean bWorkExit = false;
+    private final Runnable WorkThread = () -> {
+        while (!bWorkExit) {
+            if (bSocketClose || bRoomClose) {
+                return;
+            }
+
+            if (mKLClient.getConnect()) {
+                if (bPublish) {
+                    if (klPeerLocal.nLive == 0) {
+                        klPeerLocal.startPublish();
+                    }
+                } else {
+                    klPeerLocal.stopPublish();
+                }
+
+                if (bWorkExit || bSocketClose || bRoomClose) {
+                    return;
+                }
+
+                mMapLock.lock();
+                for (Map.Entry<String, KLPeerRemote> remote : klPeerRemoteHashMap.entrySet()) {
+                    KLPeerRemote klPeerRemote = remote.getValue();
+                    if (klPeerRemote != null) {
+                        if (klPeerRemote.nLive == 0) {
+                            klPeerRemote.startSubscribe();
+                        }
+                    }
+
+                    if (bWorkExit || bSocketClose || bRoomClose) {
+                        mMapLock.unlock();
+                        return;
+                    }
+                }
+                mMapLock.unlock();
+            } else {
+                klPeerLocal.stopPublish();
+
+                if (bWorkExit || bSocketClose || bRoomClose) {
+                    return;
+                }
+
+                mMapLock.lock();
+                for (Map.Entry<String, KLPeerRemote> remote : klPeerRemoteHashMap.entrySet()) {
+                    KLPeerRemote klPeerRemote = remote.getValue();
+                    if (klPeerRemote != null) {
+                       klPeerRemote.stopSubscribe();
+                    }
+                    klPeerRemoteHashMap.remove(remote.getKey());
+
+                    if (bWorkExit || bSocketClose || bRoomClose) {
+                        mMapLock.unlock();
+                        return;
+                    }
+                }
+                mMapLock.unlock();
+            }
+
+            for (int i = 0; i < 10; i++) {
+                if (bWorkExit || bSocketClose || bRoomClose) {
+                    return;
+                }
+                try {
+                    Thread.sleep(100);
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
+            }
         }
     };
 
@@ -96,11 +207,21 @@ public class KLEngine {
         SERVER_PORT = nPort;
     }
 
+    // 设置回调
+    public void setListen(KLListen listen) {
+        mKLListen = listen;
+    }
+
+    // 设置是否推流
+    public void setPublish(boolean bPub) {
+        bPublish = bPub;
+    }
+
     // 初始化
     boolean initSdk(String uid) {
         // 获取上下文对象
         initActivity();
-        if (mContext == null) {
+        if (mContext == null || uid.equals("")) {
             return false;
         }
         // 设置参数
@@ -118,6 +239,10 @@ public class KLEngine {
 
     // 释放资源
     void freeSdk() {
+        if (strUid.equals("")) {
+            return;
+        }
+
         if (mHandler != null) {
             mHandler.post(this::freeAudioManager);
         }
@@ -127,17 +252,26 @@ public class KLEngine {
             mEglBase = null;
         }
         mContext = null;
+        strUid = "";
     }
 
     // 登陆服务器
     public boolean start() {
-        String strUrl = "ws://" + SERVER_IP + ":" + SERVER_PORT + "/ws?peer=" + strUid;
+        if (mContext == null || strUid.equals("") || mPeerConnectionFactory == null) {
+            return false;
+        }
+
+        bSocketClose = false;
+        strUrl = "ws://" + SERVER_IP + ":" + SERVER_PORT + "/ws?peer=" + strUid;
         AtomicBoolean bReturn = new AtomicBoolean(false);
         CountDownLatch mLatch = new CountDownLatch(1);
-        mExecutor.execute(() -> {
+        new Thread(() -> {
             bReturn.set(mKLClient.start(strUrl));
+            if (bReturn.get()) {
+                mStatus = 1;
+            }
             mLatch.countDown();
-        });
+        }).start();
         try {
             mLatch.await();
         } catch (InterruptedException e) {
@@ -148,15 +282,13 @@ public class KLEngine {
 
     // 退出服务器
     void stop() {
-        if (mHandler != null && bHeart) {
-            mHandler.removeCallbacks(HeartThread);
-            bHeart = false;
-        }
+        mStatus = 0;
+        bSocketClose = true;
         CountDownLatch mLatch = new CountDownLatch(1);
-        mExecutor.execute(() -> {
+        new Thread(() -> {
             mKLClient.stop();
             mLatch.countDown();
-        });
+        }).start();
         try {
             mLatch.await();
         } catch (InterruptedException e) {
@@ -166,19 +298,30 @@ public class KLEngine {
 
     // 加入房间
     boolean JoinRoom(String rid) {
+        if (mContext == null || strUid.equals("") || mPeerConnectionFactory == null) {
+            return false;
+        }
+        if (rid.equals("")) {
+            return false;
+        }
+
         strRid = rid;
+        bRoomClose = false;
         AtomicBoolean bReturn = new AtomicBoolean(false);
         CountDownLatch mLatch = new CountDownLatch(1);
-        mExecutor.execute(() -> {
+        new Thread(() -> {
             bReturn.set(mKLClient.SendJoin());
             if (bReturn.get()) {
-                if (mHandler != null) {
-                    mHandler.postDelayed(HeartThread, 20000);
-                    bHeart = true;
-                }
+                mStatus = 2;
+                // 启动工作线程
+                bWorkExit = false;
+                new Thread(WorkThread).start();
+                // 启动心跳线程
+                bHeartExit = false;
+                new Thread(HeartThread).start();
             }
             mLatch.countDown();
-        });
+        }).start();
         try {
             mLatch.await();
         } catch (InterruptedException e) {
@@ -188,43 +331,33 @@ public class KLEngine {
     }
 
     // 离开房间
-    boolean LeaveRoom() {
-        if (mHandler != null && bHeart) {
-            mHandler.removeCallbacks(HeartThread);
-            bHeart = false;
-        }
+    void LeaveRoom() {
         if (strRid.equals("")) {
-            return true;
+            return;
         }
+
+        mStatus = 1;
+        bRoomClose = true;
+        bHeartExit = true;
+        bWorkExit = true;
+        klPeerLocal.stopPublish();
+        FreeAllSubscribe();
+
         CountDownLatch mLatch = new CountDownLatch(1);
-        mExecutor.execute(() -> {
+        new Thread(() -> {
             mKLClient.SendLeave();
             mLatch.countDown();
-        });
+        }).start();
         try {
             mLatch.await();
         } catch (InterruptedException e) {
             e.printStackTrace();
         }
-        return true;
+        strRid = "";
     }
 
-    // 推流
-    void Publish() {
-        if (klPeerLocal != null) {
-            klPeerLocal.startPublish();
-        }
-    }
-
-    // 取消推流
-    void UnPublish() {
-        if (klPeerLocal != null) {
-            klPeerLocal.stopPublish();
-        }
-    }
-
-    // 订阅
-    void Subscribe(String uid, String mid, String sfuId) {
+    // 增加拉流
+    private void Subscribe(String uid, String mid, String sfuId) {
         mMapLock.lock();
         if (klPeerRemoteHashMap.containsKey(mid)) {
             KLPeerRemote klPeerRemote = klPeerRemoteHashMap.get(mid);
@@ -244,7 +377,7 @@ public class KLEngine {
     }
 
     // 取消拉流
-    void UnSubscribe(String mid) {
+    private void UnSubscribe(String mid) {
         mMapLock.lock();
         if (klPeerRemoteHashMap.containsKey(mid)) {
             KLPeerRemote klPeerRemote = klPeerRemoteHashMap.get(mid);
@@ -252,6 +385,18 @@ public class KLEngine {
                 klPeerRemote.stopSubscribe();
             }
             klPeerRemoteHashMap.remove(mid);
+        }
+        mMapLock.unlock();
+    }
+
+    private void FreeAllSubscribe() {
+        mMapLock.lock();
+        for (Map.Entry<String, KLPeerRemote> remote : klPeerRemoteHashMap.entrySet()) {
+            KLPeerRemote klPeerRemote = remote.getValue();
+            if (klPeerRemote != null) {
+                klPeerRemote.stopSubscribe();
+            }
+            klPeerRemoteHashMap.remove(remote.getKey());
         }
         mMapLock.unlock();
     }
@@ -459,6 +604,7 @@ public class KLEngine {
     }
 
     // 反调用上层对象
+    /*
     private void callUnity(String argsName) {
         try {
             Class<?> classtype = Class.forName("com.unity3d.player.UnityPlayer");
@@ -467,100 +613,70 @@ public class KLEngine {
         } catch (Exception e) {
             e.printStackTrace();
         }
-    }
+    }*/
 
     // 处理socket断开消息
     public void respSocketEvent() {
-        if (mHandler != null) {
-            mHandler.post(() -> {
-                JSONObject obj = new JSONObject();
-                try {
-                    obj.put("to", "audio");
-                    obj.put("type", "200");
-                    obj.put("data", "");
-                    callUnity(obj.toString());
-                } catch (JSONException e) {
-                    e.printStackTrace();
-                }
-            });
-        }
+        mStatus = 0;
+        mKLClient.stop();
     }
 
     // 处理有人加入的通知
     // json (rid, uid, biz)
     public void respPeerJoin(JSONObject jsonObject) {
-        if (mHandler != null) {
-            mHandler.post(() -> {
-                JSONObject obj = new JSONObject();
-                try {
-                    obj.put("to", "audio");
-                    obj.put("type", "201");
-                    obj.put("data", jsonObject);
-                    callUnity(obj.toString());
-                } catch (JSONException e) {
-                    e.printStackTrace();
-                }
-            });
-        }
+
     }
 
     // 处理有人离开的通知
     // json (rid, uid)
     public void respPeerLeave(JSONObject jsonObject) {
-        if (mHandler != null) {
-            mHandler.post(() -> {
-                JSONObject obj = new JSONObject();
-                try {
-                    obj.put("to", "audio");
-                    obj.put("type", "202");
-                    obj.put("data", jsonObject);
-                    callUnity(obj.toString());
-                } catch (JSONException e) {
-                    e.printStackTrace();
-                }
-            });
-        }
+
     }
 
     // 处理有流加入的通知
     // json (rid, uid, mid, sfuid, minfo)
     public void respStreamAdd(JSONObject jsonObject) {
-        if (mHandler != null) {
-            mHandler.post(() -> {
-                JSONObject obj = new JSONObject();
-                try {
-                    obj.put("to", "audio");
-                    obj.put("type", "203");
-                    obj.put("data", jsonObject);
-                    callUnity(obj.toString());
-                } catch (JSONException e) {
-                    e.printStackTrace();
-                }
-            });
+        if (bSocketClose || bRoomClose) {
+            return;
+        }
+
+        try {
+            String strUid = "";
+            String strMid = "";
+            String strSfu = "";
+            if (jsonObject.has("uid")) {
+                strUid = jsonObject.getString("uid");
+            }
+            if (jsonObject.has("mid")) {
+                strMid = jsonObject.getString("mid");
+            }
+            if (jsonObject.has("sfuid")) {
+                strSfu = jsonObject.getString("sfuid");
+            }
+            Subscribe(strUid, strMid, strSfu);
+        } catch (JSONException e) {
+            e.printStackTrace();
         }
     }
 
     // 处理有流移除的通知
     // json (rid, uid, mid)
     public void respStreamRemove(JSONObject jsonObject) {
-        if (mHandler != null) {
-            mHandler.post(() -> {
-                JSONObject obj = new JSONObject();
-                try {
-                    obj.put("to", "audio");
-                    obj.put("type", "204");
-                    obj.put("data", jsonObject);
-                    callUnity(obj.toString());
-                } catch (JSONException e) {
-                    e.printStackTrace();
-                }
-            });
+        try {
+            String strMid = "";
+            if (jsonObject.has("mid")) {
+                strMid = jsonObject.getString("mid");
+            }
+            UnSubscribe(strMid);
+        } catch (JSONException e) {
+            e.printStackTrace();
         }
     }
 
     // 处理被踢下线
     // json (rid, uid)
     public void respPeerKick(JSONObject jsonObject) {
+        /*
         if (mHandler != null) {
             mHandler.post(() -> {
                 JSONObject obj = new JSONObject();
@@ -573,86 +689,6 @@ public class KLEngine {
                     e.printStackTrace();
                 }
             });
-        }
-    }
-
-    // 推流回调
-    public void OnPeerPublish(boolean bSuc, String error) {
-        if (mHandler != null) {
-            mHandler.post(() -> {
-                JSONObject obj = new JSONObject();
-                try {
-                    JSONObject data = new JSONObject();
-                    data.put("result", bSuc);
-                    data.put("msg", error);
-
-                    obj.put("to", "audio");
-                    obj.put("type", "220");
-                    obj.put("data", data);
-                    callUnity(obj.toString());
-                } catch (JSONException e) {
-                    e.printStackTrace();
-                }
-            });
-        }
-    }
-
-    // 推流连接断开回调
-    public void OnPeerPublishError() {
-        if (mHandler != null) {
-            mHandler.post(() -> {
-                JSONObject obj = new JSONObject();
-                try {
-                    obj.put("to", "audio");
-                    obj.put("type", "221");
-                    obj.put("data", "");
-                    callUnity(obj.toString());
-                } catch (JSONException e) {
-                    e.printStackTrace();
-                }
-            });
-        }
-    }
-
-    // 拉流回调
-    public void OnPeerSubscribe(String mid, boolean bSuc, String error) {
-        if (mHandler != null) {
-            mHandler.post(() -> {
-                JSONObject obj = new JSONObject();
-                try {
-                    JSONObject data = new JSONObject();
-                    data.put("mid", mid);
-                    data.put("result", bSuc);
-                    data.put("msg", error);
-
-                    obj.put("to", "audio");
-                    obj.put("type", "222");
-                    obj.put("data", data);
-                    callUnity(obj.toString());
-                } catch (JSONException e) {
-                    e.printStackTrace();
-                }
-            });
-        }
-    }
-
-    // 拉流连接断开回调
-    public void OnPeerSubscribeError(String mid) {
-        if (mHandler != null) {
-            mHandler.post(() -> {
-                JSONObject obj = new JSONObject();
-                try {
-                    JSONObject data = new JSONObject();
-                    data.put("mid", mid);
-
-                    obj.put("to", "audio");
-                    obj.put("type", "223");
-                    obj.put("data", data);
-                    callUnity(obj.toString());
-                } catch (JSONException e) {
-                    e.printStackTrace();
-                }
-            });
-        }
+        }*/
     }
 }

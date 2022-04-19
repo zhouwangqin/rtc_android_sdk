@@ -14,8 +14,12 @@ import org.webrtc.RtpReceiver;
 import org.webrtc.RtpTransceiver;
 import org.webrtc.SdpObserver;
 import org.webrtc.SessionDescription;
+import org.webrtc.VideoFrame;
+import org.webrtc.VideoSink;
+import org.webrtc.VideoTrack;
 
-import static com.fangte.sdk.KLEngine.mExecutor;
+import java.nio.ByteBuffer;
+
 import static org.webrtc.SessionDescription.Type.ANSWER;
 
 public class KLPeerRemote {
@@ -45,6 +49,44 @@ public class KLPeerRemote {
     // sdp media 对象
     private MediaConstraints sdpMediaConstraints = null;
 
+    private static byte[] decode(ByteBuffer byteBuffer) {
+        int len = byteBuffer.limit() - byteBuffer.position();
+        byte[] bytes = new byte[len];
+        byteBuffer.get(bytes);
+        return bytes;
+    }
+
+    // 本地渲染处理
+    private final ProxyVideoSink videoProxy = new ProxyVideoSink();
+    private static class ProxyVideoSink implements VideoSink {
+        public KLPeerRemote klPeerRemote = null;
+        @Override
+        public void onFrame(VideoFrame frame) {
+            KLLog.e("KLPeerRemote onFrame = " + frame.toString());
+            if (klPeerRemote != null && klPeerRemote.mKLEngine != null && klPeerRemote.mKLEngine.mKLListen != null) {
+                klPeerRemote.mKLEngine.mKLListen.OnRemoteVideo(klPeerRemote.strUid, 1,
+                        decode(frame.getBuffer().toI420().getDataY()),
+                        decode(frame.getBuffer().toI420().getDataU()),
+                        decode(frame.getBuffer().toI420().getDataV()),
+                        frame.getBuffer().toI420().getStrideY(),
+                        frame.getBuffer().toI420().getStrideU(),
+                        frame.getBuffer().toI420().getStrideV(),
+                        frame.getRotatedWidth(), frame.getRotatedHeight());
+            }
+        }
+    }
+
+    // 返回远端视频Track
+    private VideoTrack getRemoteVideoTrack() {
+        for (RtpTransceiver transceiver : mPeerConnection.getTransceivers()) {
+            MediaStreamTrack track = transceiver.getReceiver().track();
+            if (track instanceof VideoTrack) {
+                return (VideoTrack) track;
+            }
+        }
+        return null;
+    }
+
     // 启动拉流
     public void startSubscribe() {
         initPeerConnection();
@@ -61,20 +103,22 @@ public class KLPeerRemote {
     private void initPeerConnection() {
         freePeerConnection();
         sdpMediaConstraints = new MediaConstraints();
-        //sdpMediaConstraints.mandatory.add(new MediaConstraints.KeyValuePair("OfferToReceiveAudio", "true"));
-        //sdpMediaConstraints.mandatory.add(new MediaConstraints.KeyValuePair("OfferToReceiveVideo", "true"));
+        sdpMediaConstraints.mandatory.add(new MediaConstraints.KeyValuePair("OfferToReceiveAudio", "true"));
+        sdpMediaConstraints.mandatory.add(new MediaConstraints.KeyValuePair("OfferToReceiveVideo", "true"));
         // 创建PeerConnect对象
         PeerConnection.RTCConfiguration rtcConfig = new PeerConnection.RTCConfiguration(mKLEngine.iceServers);
         rtcConfig.disableIpv6 = true;
         rtcConfig.enableDtlsSrtp = true;
-        rtcConfig.tcpCandidatePolicy = PeerConnection.TcpCandidatePolicy.DISABLED;
         rtcConfig.bundlePolicy = PeerConnection.BundlePolicy.MAXBUNDLE;
         rtcConfig.sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN;
+        rtcConfig.tcpCandidatePolicy = PeerConnection.TcpCandidatePolicy.DISABLED;
+        rtcConfig.continualGatheringPolicy =  PeerConnection.ContinualGatheringPolicy.GATHER_CONTINUALLY;
         mPeerConnection = mKLEngine.mPeerConnectionFactory.createPeerConnection(rtcConfig, pcObserver);
-        // 目前只有音频
+        // 增加recv
         if (mPeerConnection != null) {
             RtpTransceiver.RtpTransceiverInit init = new RtpTransceiver.RtpTransceiverInit(RtpTransceiver.RtpTransceiverDirection.RECV_ONLY);
             mPeerConnection.addTransceiver(MediaStreamTrack.MediaType.MEDIA_TYPE_AUDIO, init);
+            mPeerConnection.addTransceiver(MediaStreamTrack.MediaType.MEDIA_TYPE_VIDEO, init);
         }
         // 状态赋值
         bClose = false;
@@ -104,7 +148,7 @@ public class KLPeerRemote {
         if (bClose) {
             return;
         }
-        mExecutor.execute(() -> {
+        new Thread(() -> {
             if (mKLEngine != null && mKLEngine.mKLClient != null && sdp != null) {
                 if (mKLEngine.mKLClient.SendSubscribe(sdp.description, strMid, sfuId)) {
                     nLive = 2;
@@ -114,15 +158,11 @@ public class KLPeerRemote {
                     return;
                 }
             }
-
             if (bClose) {
                 return;
             }
             nLive = 0;
-            if (mKLEngine != null) {
-                mKLEngine.OnPeerSubscribe(strMid, false, "KLPeerRemote send subscribe fail");
-            }
-        });
+        }).start();
     }
 
     // 取消拉流
@@ -130,10 +170,10 @@ public class KLPeerRemote {
         if (strSid.equals("")) {
             return;
         }
-        mExecutor.execute(() -> {
+        new Thread(() -> {
             mKLEngine.mKLClient.SendUnsubscribe(strMid, strSid, sfuId);
             strSid = "";
-        });
+        }).start();
     }
 
     // 设置本地offer sdp回调处理
@@ -153,17 +193,17 @@ public class KLPeerRemote {
     private class PCObserver implements PeerConnection.Observer {
         @Override
         public void onSignalingChange(PeerConnection.SignalingState signalingState) {
-
+            //KLLog.e("KLPeerRemote PeerConnection.Observer onSignalingChange = " + signalingState);
         }
 
         @Override
         public void onIceConnectionChange(PeerConnection.IceConnectionState iceConnectionState) {
-
+            //KLLog.e("KLPeerRemote PeerConnection.Observer onIceConnectionChange = " + iceConnectionState);
         }
 
         @Override
         public void onStandardizedIceConnectionChange(PeerConnection.IceConnectionState newState) {
-
+            //KLLog.e("KLPeerRemote PeerConnection.Observer onStandardizedIceConnectionChange = " + newState);
         }
 
         @Override
@@ -173,76 +213,49 @@ public class KLPeerRemote {
                 nLive = 4;
             }
             if (newState == PeerConnection.PeerConnectionState.DISCONNECTED) {
-                if (bClose) {
-                    return;
-                }
-                if (nLive != 0) {
-                    if (nLive == 4) {
-                        if (mKLEngine != null) {
-                            mKLEngine.OnPeerSubscribeError(strMid);
-                        }
-                    }
-                    if (nLive != 4) {
-                        if (mKLEngine != null) {
-                            mKLEngine.OnPeerSubscribe(strMid, false, "KLPeerRemote ice disconnect");
-                        }
-                    }
-                    nLive = 0;
-                }
+                nLive = 0;
             }
             if (newState == PeerConnection.PeerConnectionState.FAILED) {
-                if (bClose) {
-                    return;
-                }
-                if (nLive != 0) {
-                    if (nLive == 4) {
-                        if (mKLEngine != null) {
-                            mKLEngine.OnPeerSubscribeError(strMid);
-                        }
-                    }
-                    if (nLive != 4) {
-                        if (mKLEngine != null) {
-                            mKLEngine.OnPeerSubscribe(strMid, false, "KLPeerRemote ice disconnect");
-                        }
-                    }
-                    nLive = 0;
-                }
+                nLive = 0;
             }
         }
 
         @Override
         public void onIceConnectionReceivingChange(boolean b) {
-
+            //KLLog.e("KLPeerRemote PeerConnection.Observer onIceConnectionReceivingChange = " + b);
         }
 
         @Override
         public void onIceGatheringChange(PeerConnection.IceGatheringState iceGatheringState) {
-
+            //KLLog.e("KLPeerRemote PeerConnection.Observer onIceGatheringChange = " + iceGatheringState);
         }
 
         @Override
         public void onIceCandidate(IceCandidate iceCandidate) {
-
+            //KLLog.e("KLPeerRemote PeerConnection.Observer onIceCandidate = " + iceCandidate.toString());
         }
 
         @Override
         public void onIceCandidatesRemoved(IceCandidate[] iceCandidates) {
-
+            /*
+            for (IceCandidate iceCandidate : iceCandidates) {
+                KLLog.e("KLPeerRemote PeerConnection.Observer onIceCandidatesRemoved = " + iceCandidate.toString());
+            }*/
         }
 
         @Override
         public void onSelectedCandidatePairChanged(CandidatePairChangeEvent event) {
-
+            //KLLog.e("KLPeerRemote PeerConnection.Observer onSelectedCandidatePairChanged = " + event.toString());
         }
 
         @Override
         public void onAddStream(MediaStream mediaStream) {
-
+            //KLLog.e("KLPeerRemote PeerConnection.Observer onAddStream = " + mediaStream.toString());
         }
 
         @Override
         public void onRemoveStream(MediaStream mediaStream) {
-
+            //KLLog.e("KLPeerRemote PeerConnection.Observer onRemoveStream = " + mediaStream.toString());
         }
 
         @Override
@@ -252,17 +265,17 @@ public class KLPeerRemote {
 
         @Override
         public void onRenegotiationNeeded() {
-
+            //KLLog.e("KLPeerRemote PeerConnection.Observer onRenegotiationNeeded");
         }
 
         @Override
         public void onAddTrack(RtpReceiver rtpReceiver, MediaStream[] mediaStreams) {
-
+            //KLLog.e("KLPeerRemote PeerConnection.Observer onAddTrack = " + rtpReceiver.toString());
         }
 
         @Override
         public void onTrack(RtpTransceiver transceiver) {
-
+            //KLLog.e("KLPeerRemote PeerConnection.Observer onTrack = " + transceiver.toString());
         }
     }
 
@@ -290,25 +303,13 @@ public class KLPeerRemote {
         @Override
         public void onCreateFailure(final String error) {
             KLLog.e("KLPeerRemote create offer sdp error = " + error);
-            if (bClose) {
-                return;
-            }
             nLive = 0;
-            if (mKLEngine != null) {
-                mKLEngine.OnPeerSubscribe(strMid, false, error);
-            }
         }
 
         @Override
         public void onSetFailure(final String error) {
             KLLog.e("KLPeerRemote offer sdp set error = " + error);
-            if (bClose) {
-                return;
-            }
             nLive = 0;
-            if (mKLEngine != null) {
-                mKLEngine.OnPeerSubscribe(strMid, false, error);
-            }
         }
     }
 
@@ -322,12 +323,10 @@ public class KLPeerRemote {
         @Override
         public void onSetSuccess() {
             KLLog.e("KLPeerRemote set remote sdp ok");
-            if (bClose) {
-                return;
-            }
             nLive = 3;
-            if (mKLEngine != null) {
-                mKLEngine.OnPeerSubscribe(strMid, true, "");
+            VideoTrack mVideoTrack = getRemoteVideoTrack();
+            if (mVideoTrack != null) {
+                mVideoTrack.addSink(videoProxy);
             }
         }
 
@@ -339,13 +338,7 @@ public class KLPeerRemote {
         @Override
         public void onSetFailure(final String error) {
             KLLog.e("KLPeerRemote answer sdp set error = " + error);
-            if (bClose) {
-                return;
-            }
             nLive = 0;
-            if (mKLEngine != null) {
-                mKLEngine.OnPeerSubscribe(strMid, false, error);
-            }
         }
     }
 }

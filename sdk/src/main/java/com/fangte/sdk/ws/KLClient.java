@@ -1,6 +1,7 @@
 package com.fangte.sdk.ws;
 
 import java.util.Random;
+import java.util.concurrent.locks.ReentrantLock;
 
 import org.json.JSONArray;
 import org.json.JSONException;
@@ -18,6 +19,7 @@ public class KLClient {
     public KLEngine mKLEngine = null;
     // WebSocket 对象
     private final KLWebSocket mKLWebSocket = new KLWebSocket();
+    private final ReentrantLock mSocketLock = new ReentrantLock();
 
     // 当前发送信令类型
     private int nIndex = 0;
@@ -31,33 +33,55 @@ public class KLClient {
     public String strSdp = "";
     public String strSid = "";
 
-    // 退出标记
-    public boolean bClose = false;
+    // 标记
+    private boolean bClose = false;
+    private boolean bConnect = false;
+
+    public void onOpen() {
+        bConnect = true;
+    }
+
+    public void onClose() {
+        bConnect = false;
+        if (!bClose && mKLEngine != null) {
+            mKLEngine.respSocketEvent();
+        }
+    }
 
     // 建立ws连接
     public boolean start(String strUrl) {
         stop();
+
         bClose = false;
+        bConnect = false;
         mKLWebSocket.mKLClient = this;
-        return mKLWebSocket.openWebSocket(strUrl);
+
+        mSocketLock.lock();
+        boolean bResult = mKLWebSocket.openWebSocket(strUrl);
+        mSocketLock.unlock();
+        return bResult;
     }
 
     // 关闭ws连接
     public void stop() {
         bClose = true;
+        bConnect = false;
+        mSocketLock.lock();
         mKLWebSocket.closeWebSocket();
+        mSocketLock.unlock();
     }
 
     // 返回连接状态
     public boolean getConnect() {
-        if (bClose) {
-            return false;
-        }
-        return mKLWebSocket.getConnectStatus();
+        return bConnect;
     }
 
     // 分析接收的数据
     void OnDataRecv(String strData) {
+        if (bClose) {
+            return;
+        }
+
         try {
             JSONObject jsonObject = new JSONObject(strData);
             if (jsonObject.has("response")) {
@@ -173,9 +197,14 @@ public class KLClient {
     */
     // 加入房间
     public boolean SendJoin() {
-        if (bClose) {
+        if (bClose || !bConnect) {
             return false;
         }
+        if (mKLEngine != null && mKLEngine.strRid.equals("")) {
+            return false;
+        }
+
+        mSocketLock.lock();
         try {
             nCount = new Random().nextInt(9000000) + 1000000;
             nIndex = nCount;
@@ -199,11 +228,13 @@ public class KLClient {
                 long nStartTime = System.currentTimeMillis();
                 while (System.currentTimeMillis() - nStartTime < 5000) {
                     if (nRespOK == 0) {
+                        mSocketLock.unlock();
                         return false;
                     }
                     if (nRespOK == 1) {
                         if (bRespResult) {
                             KLLog.e("SendJoin ok2");
+                            mSocketLock.unlock();
                             return true;
                         } else {
                             try {
@@ -217,10 +248,12 @@ public class KLClient {
             } else {
                 KLLog.e("SendJoin fail");
             }
+            mSocketLock.unlock();
             return false;
         } catch (JSONException e) {
             e.printStackTrace();
         }
+        mSocketLock.unlock();
         return false;
     }
 
@@ -234,9 +267,14 @@ public class KLClient {
     */
     // 退出房间
     public void SendLeave() {
-        if (bClose) {
+        if (bClose || !bConnect) {
             return;
         }
+        if (mKLEngine != null && mKLEngine.strRid.equals("")) {
+            return;
+        }
+
+        mSocketLock.lock();
         try {
             nCount = new Random().nextInt(9000000) + 1000000;
 
@@ -255,6 +293,7 @@ public class KLClient {
         } catch (JSONException e) {
             e.printStackTrace();
         }
+        mSocketLock.unlock();
     }
 
     /*
@@ -267,9 +306,14 @@ public class KLClient {
     */
     // 发送心跳
     public boolean SendAlive() {
-        if (bClose) {
+        if (bClose || !bConnect) {
             return false;
         }
+        if (mKLEngine != null && mKLEngine.strRid.equals("")) {
+            return false;
+        }
+
+        mSocketLock.lock();
         try {
             nCount = new Random().nextInt(9000000) + 1000000;
             nIndex = nCount;
@@ -293,11 +337,13 @@ public class KLClient {
                 long nStartTime = System.currentTimeMillis();
                 while (System.currentTimeMillis() - nStartTime < 5000) {
                     if (nRespOK == 0) {
+                        mSocketLock.unlock();
                         return false;
                     }
                     if (nRespOK == 1) {
                         if (bRespResult) {
                             KLLog.e("SendAlive ok2");
+                            mSocketLock.unlock();
                             return true;
                         } else {
                             try {
@@ -311,10 +357,12 @@ public class KLClient {
             } else {
                 KLLog.e("SendAlive fail");
             }
+            mSocketLock.unlock();
             return false;
         } catch (JSONException e) {
             e.printStackTrace();
         }
+        mSocketLock.unlock();
         return false;
     }
 
@@ -334,9 +382,14 @@ public class KLClient {
     */
     // 发布流
     public boolean SendPublish(String sdp, boolean bAudio, boolean bVideo, int videoType) {
-        if (bClose) {
+        if (bClose || !bConnect) {
             return false;
         }
+        if (mKLEngine != null && mKLEngine.strRid.equals("")) {
+            return false;
+        }
+
+        mSocketLock.lock();
         try {
             nCount = new Random().nextInt(9000000) + 1000000;
             nIndex = nCount;
@@ -371,11 +424,13 @@ public class KLClient {
                 long nStartTime = System.currentTimeMillis();
                 while (System.currentTimeMillis() - nStartTime < 5000) {
                     if (nRespOK == 0) {
+                        mSocketLock.unlock();
                         return false;
                     }
                     if (nRespOK == 1) {
                         if (bRespResult) {
                             KLLog.e("SendPublish ok2");
+                            mSocketLock.unlock();
                             return true;
                         } else {
                             try {
@@ -389,10 +444,12 @@ public class KLClient {
             } else {
                 KLLog.e("SendPublish fail");
             }
+            mSocketLock.unlock();
             return false;
         } catch (JSONException e) {
             e.printStackTrace();
         }
+        mSocketLock.unlock();
         return false;
     }
 
@@ -408,9 +465,14 @@ public class KLClient {
     */
     // 取消发布流
     public void SendUnpublish(String mid, String sfuid) {
-        if (bClose) {
+        if (bClose || !bConnect) {
             return;
         }
+        if (mKLEngine != null && mKLEngine.strRid.equals("")) {
+            return;
+        }
+
+        mSocketLock.lock();
         try {
             nCount = new Random().nextInt(9000000) + 1000000;
 
@@ -433,6 +495,7 @@ public class KLClient {
         } catch (JSONException e) {
             e.printStackTrace();
         }
+        mSocketLock.unlock();
     }
 
     /*
@@ -448,9 +511,14 @@ public class KLClient {
     */
     // 订阅流
     public boolean SendSubscribe(String sdp, String mid, String sfuid) {
-        if (bClose) {
+        if (bClose || !bConnect) {
             return false;
         }
+        if (mKLEngine != null && mKLEngine.strRid.equals("")) {
+            return false;
+        }
+
+        mSocketLock.lock();
         try {
             nCount = new Random().nextInt(9000000) + 1000000;
             nIndex = nCount;
@@ -483,11 +551,13 @@ public class KLClient {
                 long nStartTime = System.currentTimeMillis();
                 while (System.currentTimeMillis() - nStartTime < 5000) {
                     if (nRespOK == 0) {
+                        mSocketLock.unlock();
                         return false;
                     }
                     if (nRespOK == 1) {
                         if (bRespResult) {
                             KLLog.e("SendSubscribe ok2");
+                            mSocketLock.unlock();
                             return true;
                         } else {
                             try {
@@ -501,10 +571,12 @@ public class KLClient {
             } else {
                 KLLog.e("SendSubscribe fail");
             }
+            mSocketLock.unlock();
             return false;
         } catch (JSONException e) {
             e.printStackTrace();
         }
+        mSocketLock.unlock();
         return false;
     }
 
@@ -521,9 +593,14 @@ public class KLClient {
     */
     // 取消订阅流
     public void SendUnsubscribe(String mid, String sid, String sfuid) {
-        if (bClose) {
+        if (bClose || !bConnect) {
             return;
         }
+        if (mKLEngine != null && mKLEngine.strRid.equals("")) {
+            return;
+        }
+
+        mSocketLock.lock();
         try {
             nCount = new Random().nextInt(9000000) + 1000000;
 
@@ -545,5 +622,6 @@ public class KLClient {
         } catch (JSONException e) {
             e.printStackTrace();
         }
+        mSocketLock.unlock();
     }
 }

@@ -9,6 +9,11 @@ public class KLSdk {
         mKLEngine.setServerIp(strIp, nPort);
     }
 
+    // 设置回调
+    public void setListen(KLListen listen) {
+        mKLEngine.setListen(listen);
+    }
+
     // 初始化SDK
     public boolean initSdk(String uid) {
         return mKLEngine.initSdk(uid);
@@ -29,39 +34,19 @@ public class KLSdk {
         mKLEngine.stop();
     }
 
-    // 返回连接状态
-    public boolean getConnect() {
-        return mKLEngine.mKLClient.getConnect();
-    }
-
     // 加入房间
-    public boolean JoinRoom(String rid) {
+    public boolean joinRoom(String rid) {
         return mKLEngine.JoinRoom(rid);
     }
 
     // 离开房间
-    public boolean leaveRoom() {
-        return mKLEngine.LeaveRoom();
+    public void leaveRoom() {
+        mKLEngine.LeaveRoom();
     }
 
-    // 开始推流
-    void Publish() {
-        mKLEngine.Publish();
-    }
-
-    // 取消推流
-    void UnPublish() {
-        mKLEngine.UnPublish();
-    }
-
-    // 订阅
-    void Subscribe(String uid, String mid, String sfuId) {
-        mKLEngine.Subscribe(uid, mid, sfuId);
-    }
-
-    // 取消拉流
-    void UnSubscribe(String mid) {
-        mKLEngine.UnSubscribe(mid);
+    // 设置是否推流
+    public void setPublish(boolean bPub) {
+        mKLEngine.setPublish(bPub);
     }
 
     // 设置麦克风
