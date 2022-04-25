@@ -49,9 +49,8 @@ public class KLEngine {
 
     // 标记
     private int mStatus = 0;
-    private boolean bPublish  = true;
+    private boolean bPublish = true;
     private boolean bRoomClose = false;
-    private boolean bSocketClose = false;
 
     // 音频设备管理
     private AppRTCAudioManager audioManager = null;
@@ -73,53 +72,68 @@ public class KLEngine {
     private final HashMap<String, KLPeerRemote> klPeerRemoteHashMap = new HashMap<>();
     private final ReentrantLock mMapLock = new ReentrantLock();
 
+    // 写日志
+    public void WriteDebugLog(String log) {
+        if (mKLListen != null) {
+            mKLListen.OnDebugLog(log);
+        }
+    }
+
     // 心跳线程
-    private int nHeartError = 0;
+    private int nCount = 1;
     private boolean bHeartExit = false;
     private final Runnable HeartThread = () -> {
-        int nCount = 1;
+        WriteDebugLog("启动心跳线程");
+        nCount = 1;
         while (!bHeartExit) {
-            if (bSocketClose || bRoomClose) {
+            if (bRoomClose) {
+                WriteDebugLog("退出心跳线程1");
                 return;
             }
 
             if (mStatus == 0) {
-                nCount = 1;
+                nCount = 10;
+                WriteDebugLog("重连socket = " + strUrl);
                 if (mKLClient.start(strUrl)) {
-                    mStatus = 1;
-                }
+                    WriteDebugLog("重连socket成功");
 
-                if (bHeartExit || bSocketClose || bRoomClose) {
-                    return;
+                    if (bHeartExit || bRoomClose) {
+                        WriteDebugLog("退出心跳线程2");
+                        return;
+                    }
+
+                    WriteDebugLog("重新加入房间");
+                    if (mKLClient.SendJoin()) {
+                        WriteDebugLog("重新加入房间成功");
+                        nCount = 200;
+                        mStatus = 1;
+                    } else {
+                        WriteDebugLog("重新加入房间失败");
+                        mKLClient.stop();
+                    }
+
+                    if (bHeartExit || bRoomClose) {
+                        WriteDebugLog("退出心跳线程3");
+                        return;
+                    }
+                } else {
+                    WriteDebugLog("重连socket失败");
+                    mKLClient.stop();
+
+                    if (bHeartExit || bRoomClose) {
+                        WriteDebugLog("退出心跳线程4");
+                        return;
+                    }
                 }
             } else if (mStatus == 1) {
-                nCount = 10;
-                if (mKLClient.SendJoin()) {
-                    nCount = 200;
-                    mStatus = 2;
-                }
-
-                if (bHeartExit || bSocketClose || bRoomClose) {
-                    return;
-                }
-            } else if (mStatus == 2) {
+                WriteDebugLog("发送心跳");
                 nCount = 200;
                 mKLClient.SendAlive();
-                /*
-                if (mKLClient.SendAlive()) {
-                    nHeartError = 0;
-                } else {
-                    nHeartError++;
-                }
-                if (nHeartError >= 2) {
-                    nCount = 1;
-                    mStatus = 0;
-                    mKLClient.stop();
-                }*/
             }
 
             for (int i = 0; i < nCount; i++) {
-                if (bHeartExit || bSocketClose || bRoomClose) {
+                if (bHeartExit || bRoomClose) {
+                    WriteDebugLog("退出心跳线程5");
                     return;
                 }
                 try {
@@ -129,26 +143,31 @@ public class KLEngine {
                 }
             }
         }
+        WriteDebugLog("退出心跳线程");
     };
 
     // 工作线程
     private boolean bWorkExit = false;
     private final Runnable WorkThread = () -> {
+        WriteDebugLog("启动工作线程");
         while (!bWorkExit) {
-            if (bSocketClose || bRoomClose) {
+            if (bRoomClose) {
+                WriteDebugLog("退出工作线程1");
                 return;
             }
 
-            if (mKLClient.getConnect()) {
+            if (mStatus == 1) {
                 if (bPublish) {
                     if (klPeerLocal.nLive == 0) {
-                        klPeerLocal.startPublish();
+                        WriteDebugLog("启动音频推流");
+                        Publish();
                     }
                 } else {
-                    klPeerLocal.stopPublish();
+                    UnPublish();
                 }
 
-                if (bWorkExit || bSocketClose || bRoomClose) {
+                if (bWorkExit || bRoomClose) {
+                    WriteDebugLog("退出工作线程2");
                     return;
                 }
 
@@ -157,20 +176,24 @@ public class KLEngine {
                     KLPeerRemote klPeerRemote = remote.getValue();
                     if (klPeerRemote != null) {
                         if (klPeerRemote.nLive == 0) {
+                            WriteDebugLog("启动拉流 = " + klPeerRemote.strUid);
                             klPeerRemote.startSubscribe();
                         }
                     }
 
-                    if (bWorkExit || bSocketClose || bRoomClose) {
+                    if (bWorkExit || bRoomClose) {
+                        WriteDebugLog("退出工作线程3");
                         mMapLock.unlock();
                         return;
                     }
                 }
                 mMapLock.unlock();
             } else {
-                klPeerLocal.stopPublish();
+                WriteDebugLog("停止音频推流");
+                UnPublish();
 
-                if (bWorkExit || bSocketClose || bRoomClose) {
+                if (bWorkExit || bRoomClose) {
+                    WriteDebugLog("退出工作线程4");
                     return;
                 }
 
@@ -178,20 +201,23 @@ public class KLEngine {
                 for (Map.Entry<String, KLPeerRemote> remote : klPeerRemoteHashMap.entrySet()) {
                     KLPeerRemote klPeerRemote = remote.getValue();
                     if (klPeerRemote != null) {
-                       klPeerRemote.stopSubscribe();
+                        WriteDebugLog("停止拉流 = " + klPeerRemote.strUid);
+                        klPeerRemote.stopSubscribe();
                     }
-                    klPeerRemoteHashMap.remove(remote.getKey());
 
-                    if (bWorkExit || bSocketClose || bRoomClose) {
+                    if (bWorkExit || bRoomClose) {
+                        WriteDebugLog("退出工作线程5");
                         mMapLock.unlock();
                         return;
                     }
                 }
+                klPeerRemoteHashMap.clear();
                 mMapLock.unlock();
             }
 
             for (int i = 0; i < 10; i++) {
-                if (bWorkExit || bSocketClose || bRoomClose) {
+                if (bWorkExit || bRoomClose) {
+                    WriteDebugLog("退出工作线程6");
                     return;
                 }
                 try {
@@ -201,6 +227,7 @@ public class KLEngine {
                 }
             }
         }
+        WriteDebugLog("退出工作线程");
     };
 
     // 设置信令服务器IP
@@ -257,47 +284,6 @@ public class KLEngine {
         strUid = "";
     }
 
-    // 登陆服务器
-    public boolean start() {
-        if (mContext == null || strUid.equals("") || mPeerConnectionFactory == null) {
-            return false;
-        }
-
-        bSocketClose = false;
-        strUrl = "ws://" + SERVER_IP + ":" + SERVER_PORT + "/ws?peer=" + strUid;
-        AtomicBoolean bReturn = new AtomicBoolean(false);
-        CountDownLatch mLatch = new CountDownLatch(1);
-        new Thread(() -> {
-            bReturn.set(mKLClient.start(strUrl));
-            if (bReturn.get()) {
-                mStatus = 1;
-            }
-            mLatch.countDown();
-        }).start();
-        try {
-            mLatch.await();
-        } catch (InterruptedException e) {
-            e.printStackTrace();
-        }
-        return bReturn.get();
-    }
-
-    // 退出服务器
-    void stop() {
-        mStatus = 0;
-        bSocketClose = true;
-        CountDownLatch mLatch = new CountDownLatch(1);
-        new Thread(() -> {
-            mKLClient.stop();
-            mLatch.countDown();
-        }).start();
-        try {
-            mLatch.await();
-        } catch (InterruptedException e) {
-            e.printStackTrace();
-        }
-    }
-
     // 加入房间
     boolean JoinRoom(String rid) {
         if (mContext == null || strUid.equals("") || mPeerConnectionFactory == null) {
@@ -308,19 +294,36 @@ public class KLEngine {
         }
 
         strRid = rid;
+        strUrl = "ws://" + SERVER_IP + ":" + SERVER_PORT + "/ws?peer=" + strUid;
+
         bRoomClose = false;
         AtomicBoolean bReturn = new AtomicBoolean(false);
         CountDownLatch mLatch = new CountDownLatch(1);
         new Thread(() -> {
-            bReturn.set(mKLClient.SendJoin());
-            if (bReturn.get()) {
-                mStatus = 2;
-                // 启动工作线程
-                bWorkExit = false;
-                new Thread(WorkThread).start();
-                // 启动心跳线程
-                bHeartExit = false;
-                new Thread(HeartThread).start();
+            bReturn.set(false);
+            WriteDebugLog("启动socket连接");
+            if (mKLClient.start(strUrl)) {
+                WriteDebugLog("启动socket连接成功");
+                WriteDebugLog("开始加入房间");
+                if (mKLClient.SendJoin()) {
+                    WriteDebugLog("加入房间成功");
+                    mStatus = 1;
+                    // 启动工作线程
+                    bWorkExit = false;
+                    new Thread(WorkThread).start();
+                    // 启动心跳线程
+                    bHeartExit = false;
+                    new Thread(HeartThread).start();
+                    bReturn.set(true);
+                } else {
+                    WriteDebugLog("加入房间失败");
+                    mStatus = 0;
+                    mKLClient.stop();
+                }
+            } else {
+                WriteDebugLog("启动socket连接失败");
+                mStatus = 0;
+                mKLClient.stop();
             }
             mLatch.countDown();
         }).start();
@@ -337,17 +340,24 @@ public class KLEngine {
         if (strRid.equals("")) {
             return;
         }
+        if (bRoomClose) {
+            return;
+        }
 
-        mStatus = 1;
+        mStatus = 0;
         bRoomClose = true;
+        WriteDebugLog("停止线程");
         bHeartExit = true;
         bWorkExit = true;
-        klPeerLocal.stopPublish();
+        WriteDebugLog("停止所有拉流");
         FreeAllSubscribe();
-
+        WriteDebugLog("停止音频推流");
+        UnPublish();
+        WriteDebugLog("停止socket连接");
         CountDownLatch mLatch = new CountDownLatch(1);
         new Thread(() -> {
             mKLClient.SendLeave();
+            mKLClient.stop();
             mLatch.countDown();
         }).start();
         try {
@@ -358,21 +368,29 @@ public class KLEngine {
         strRid = "";
     }
 
+    // 启动推流
+    private void Publish() {
+        mMapLock.lock();
+        klPeerLocal.startPublish();
+        mMapLock.unlock();
+    }
+
+    // 停止推流
+    private void UnPublish() {
+        mMapLock.lock();
+        klPeerLocal.stopPublish();
+        mMapLock.unlock();
+    }
+
     // 增加拉流
     private void Subscribe(String uid, String mid, String sfuId) {
         mMapLock.lock();
-        if (klPeerRemoteHashMap.containsKey(mid)) {
-            KLPeerRemote klPeerRemote = klPeerRemoteHashMap.get(mid);
-            if (klPeerRemote != null) {
-                klPeerRemote.startSubscribe();
-            }
-        } else {
+        if (!klPeerRemoteHashMap.containsKey(mid)) {
             KLPeerRemote klPeerRemote = new KLPeerRemote();
             klPeerRemote.strUid = uid;
             klPeerRemote.strMid = mid;
             klPeerRemote.sfuId = sfuId;
             klPeerRemote.mKLEngine = this;
-            klPeerRemote.startSubscribe();
             klPeerRemoteHashMap.put(mid, klPeerRemote);
         }
         mMapLock.unlock();
@@ -391,6 +409,7 @@ public class KLEngine {
         mMapLock.unlock();
     }
 
+    // 取消所有拉流
     private void FreeAllSubscribe() {
         mMapLock.lock();
         for (Map.Entry<String, KLPeerRemote> remote : klPeerRemoteHashMap.entrySet()) {
@@ -398,8 +417,8 @@ public class KLEngine {
             if (klPeerRemote != null) {
                 klPeerRemote.stopSubscribe();
             }
-            klPeerRemoteHashMap.remove(remote.getKey());
         }
+        klPeerRemoteHashMap.clear();
         mMapLock.unlock();
     }
 
@@ -619,8 +638,11 @@ public class KLEngine {
 
     // 处理socket断开消息
     public void respSocketEvent() {
-        mStatus = 0;
-        mKLClient.stop();
+        new Thread(() -> {
+            nCount = 10;
+            mStatus = 0;
+            mKLClient.stop();
+        }).start();
     }
 
     // 处理有人加入的通知
@@ -638,7 +660,7 @@ public class KLEngine {
     // 处理有流加入的通知
     // json (rid, uid, mid, sfuid, minfo)
     public void respStreamAdd(JSONObject jsonObject) {
-        if (bSocketClose || bRoomClose) {
+        if (bRoomClose) {
             return;
         }
 

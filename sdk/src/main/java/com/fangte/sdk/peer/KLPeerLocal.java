@@ -79,18 +79,22 @@ public class KLPeerLocal {
         rtcConfig.bundlePolicy = PeerConnection.BundlePolicy.MAXBUNDLE;
         rtcConfig.sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN;
         rtcConfig.tcpCandidatePolicy = PeerConnection.TcpCandidatePolicy.DISABLED;
-        rtcConfig.continualGatheringPolicy =  PeerConnection.ContinualGatheringPolicy.GATHER_CONTINUALLY;
+        rtcConfig.continualGatheringPolicy = PeerConnection.ContinualGatheringPolicy.GATHER_CONTINUALLY;
         mPeerConnection = mKLEngine.mPeerConnectionFactory.createPeerConnection(rtcConfig, pcObserver);
         // 添加Track
         List<String> mediaStreamLabels = Collections.singletonList("ARDAMS");
         mPeerConnection.addTrack(createAudioTrack(), mediaStreamLabels);
         // 状态赋值
-        bClose = false;
         nLive = 1;
+        bClose = false;
     }
 
     // 删除PeerConnection
     private void freePeerConnection() {
+        if (bClose) {
+            return;
+        }
+
         nLive = 0;
         bClose = true;
         localSdp = null;
@@ -309,6 +313,9 @@ public class KLPeerLocal {
         @Override
         public void onSetSuccess() {
             KLLog.e("KLPeerLocal set remote sdp ok");
+            if (bClose) {
+                return;
+            }
             nLive = 3;
         }
 

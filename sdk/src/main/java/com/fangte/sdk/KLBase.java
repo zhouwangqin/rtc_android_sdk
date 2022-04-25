@@ -7,14 +7,10 @@ public class KLBase {
 
     // 房间
     public static final int SEND_BIZ_JOIN = 10000;
-    public static final int SEND_BIZ_LEAVE = 10001;
-    public static final int SEND_BIZ_KEEP = 10002;
     // 推流
     public static final int SEND_BIZ_PUB = 10010;
-    public static final int SEND_BIZ_UNPUB = 10011;
     // 拉流
     public static final int SEND_BIZ_SUB = 10015;
-    public static final int SEND_BIZ_UNSUB = 10016;
 
     // 信令服务器地址
     static String SERVER_IP = "120.238.78.213";

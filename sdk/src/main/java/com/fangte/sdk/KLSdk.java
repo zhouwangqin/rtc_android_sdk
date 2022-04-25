@@ -24,16 +24,6 @@ public class KLSdk {
         mKLEngine.freeSdk();
     }
 
-    // 启动
-    public boolean start() {
-        return mKLEngine.start();
-    }
-
-    // 停止
-    public void stop() {
-        mKLEngine.stop();
-    }
-
     // 加入房间
     public boolean joinRoom(String rid) {
         return mKLEngine.JoinRoom(rid);

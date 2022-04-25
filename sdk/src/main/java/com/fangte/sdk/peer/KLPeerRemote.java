@@ -1,6 +1,7 @@
 package com.fangte.sdk.peer;
 
 import com.fangte.sdk.KLEngine;
+import com.fangte.sdk.KLFrame;
 import com.fangte.sdk.util.KLLog;
 
 import org.webrtc.CandidatePairChangeEvent;
@@ -49,29 +50,55 @@ public class KLPeerRemote {
     // sdp media 对象
     private MediaConstraints sdpMediaConstraints = null;
 
-    private static byte[] decode(ByteBuffer byteBuffer) {
-        int len = byteBuffer.limit() - byteBuffer.position();
-        byte[] bytes = new byte[len];
-        byteBuffer.get(bytes);
-        return bytes;
-    }
-
     // 本地渲染处理
+    private final KLFrame klFrame = new KLFrame();
     private final ProxyVideoSink videoProxy = new ProxyVideoSink();
+
     private static class ProxyVideoSink implements VideoSink {
         public KLPeerRemote klPeerRemote = null;
+
         @Override
         public void onFrame(VideoFrame frame) {
-            KLLog.e("KLPeerRemote onFrame = " + frame.toString());
             if (klPeerRemote != null && klPeerRemote.mKLEngine != null && klPeerRemote.mKLEngine.mKLListen != null) {
-                klPeerRemote.mKLEngine.mKLListen.OnRemoteVideo(klPeerRemote.strUid, 1,
-                        decode(frame.getBuffer().toI420().getDataY()),
-                        decode(frame.getBuffer().toI420().getDataU()),
-                        decode(frame.getBuffer().toI420().getDataV()),
-                        frame.getBuffer().toI420().getStrideY(),
-                        frame.getBuffer().toI420().getStrideU(),
-                        frame.getBuffer().toI420().getStrideV(),
-                        frame.getRotatedWidth(), frame.getRotatedHeight());
+                if (frame != null) {
+                    if (frame.getBuffer() != null) {
+                        VideoFrame.I420Buffer i420Buffer = frame.getBuffer().toI420();
+                        if (i420Buffer != null) {
+                            int nYlen = i420Buffer.getWidth() * i420Buffer.getHeight();
+                            int nUlen = i420Buffer.getWidth() * i420Buffer.getHeight() / 4;
+                            int nVlen = i420Buffer.getWidth() * i420Buffer.getHeight() / 4;
+                            byte[] ybytes = new byte[nYlen];
+                            byte[] ubytes = new byte[nUlen];
+                            byte[] vbytes = new byte[nVlen];
+                            if (i420Buffer.getDataY() != null) {
+                                i420Buffer.getDataY().get(ybytes);
+                            }
+                            if (i420Buffer.getDataU() != null) {
+                                i420Buffer.getDataU().get(ubytes);
+                            }
+                            if (i420Buffer.getDataV() != null) {
+                                i420Buffer.getDataV().get(vbytes);
+                            }
+
+                            klPeerRemote.klFrame.uid = klPeerRemote.strUid;
+                            klPeerRemote.klFrame.video_type = 1;
+                            klPeerRemote.klFrame.sy = i420Buffer.getStrideY();
+                            klPeerRemote.klFrame.su = i420Buffer.getStrideU();
+                            klPeerRemote.klFrame.sv = i420Buffer.getStrideV();
+                            klPeerRemote.klFrame.yb = new byte[nYlen];
+                            klPeerRemote.klFrame.ub = new byte[nUlen];
+                            klPeerRemote.klFrame.vb = new byte[nVlen];
+                            klPeerRemote.klFrame.width = i420Buffer.getWidth();
+                            klPeerRemote.klFrame.height = i420Buffer.getHeight();
+                            System.arraycopy(ybytes, 0, klPeerRemote.klFrame.yb, 0, nYlen);
+                            System.arraycopy(ubytes, 0, klPeerRemote.klFrame.ub, 0, nUlen);
+                            System.arraycopy(vbytes, 0, klPeerRemote.klFrame.vb, 0, nVlen);
+                            klPeerRemote.mKLEngine.mKLListen.OnRemoteVideo(klPeerRemote.klFrame);
+
+                            i420Buffer.release();
+                        }
+                    }
+                }
             }
         }
     }
@@ -112,21 +139,26 @@ public class KLPeerRemote {
         rtcConfig.bundlePolicy = PeerConnection.BundlePolicy.MAXBUNDLE;
         rtcConfig.sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN;
         rtcConfig.tcpCandidatePolicy = PeerConnection.TcpCandidatePolicy.DISABLED;
-        rtcConfig.continualGatheringPolicy =  PeerConnection.ContinualGatheringPolicy.GATHER_CONTINUALLY;
+        rtcConfig.continualGatheringPolicy = PeerConnection.ContinualGatheringPolicy.GATHER_CONTINUALLY;
         mPeerConnection = mKLEngine.mPeerConnectionFactory.createPeerConnection(rtcConfig, pcObserver);
-        // 增加recv
+        // 增加接收
         if (mPeerConnection != null) {
             RtpTransceiver.RtpTransceiverInit init = new RtpTransceiver.RtpTransceiverInit(RtpTransceiver.RtpTransceiverDirection.RECV_ONLY);
             mPeerConnection.addTransceiver(MediaStreamTrack.MediaType.MEDIA_TYPE_AUDIO, init);
             mPeerConnection.addTransceiver(MediaStreamTrack.MediaType.MEDIA_TYPE_VIDEO, init);
+            videoProxy.klPeerRemote = this;
         }
         // 状态赋值
-        bClose = false;
         nLive = 1;
+        bClose = false;
     }
 
     // 删除PeerConnection
     private void freePeerConnection() {
+        if (bClose) {
+            return;
+        }
+
         nLive = 0;
         bClose = true;
         localSdp = null;
@@ -323,9 +355,15 @@ public class KLPeerRemote {
         @Override
         public void onSetSuccess() {
             KLLog.e("KLPeerRemote set remote sdp ok");
+            if (bClose) {
+                return;
+            }
             nLive = 3;
+
+            mKLEngine.WriteDebugLog("获取视频track = " + strMid);
             VideoTrack mVideoTrack = getRemoteVideoTrack();
             if (mVideoTrack != null) {
+                mKLEngine.WriteDebugLog("增加视频帧回调 = " + strMid);
                 mVideoTrack.addSink(videoProxy);
             }
         }

@@ -13,8 +13,6 @@ import com.fangte.sdk.util.KLLog;
 import static com.fangte.sdk.KLBase.*;
 
 public class KLClient {
-    // id计数
-    private int nCount = 0;
     // 上层对象
     public KLEngine mKLEngine = null;
     // WebSocket 对象
@@ -64,6 +62,10 @@ public class KLClient {
 
     // 关闭ws连接
     public void stop() {
+        if (bClose) {
+            return;
+        }
+
         bClose = true;
         bConnect = false;
         mSocketLock.lock();
@@ -111,8 +113,6 @@ public class KLClient {
                                             mKLEngine.respStreamAdd(pub);
                                         }
                                     }
-                                } else if (nType == SEND_BIZ_KEEP) {
-                                    bRespResult = true;
                                 } else if (nType == SEND_BIZ_PUB) {
                                     // 推流
                                     JSONObject data = jsonObject.getJSONObject("data");
@@ -200,13 +200,16 @@ public class KLClient {
         if (bClose || !bConnect) {
             return false;
         }
-        if (mKLEngine != null && mKLEngine.strRid.equals("")) {
+        if (mKLEngine == null) {
+            return false;
+        }
+        if (mKLEngine.strRid.equals("")) {
             return false;
         }
 
         mSocketLock.lock();
         try {
-            nCount = new Random().nextInt(9000000) + 1000000;
+            int nCount = new Random().nextInt(9000000) + 1000000;
             nIndex = nCount;
 
             JSONObject jsonData = new JSONObject();
@@ -226,7 +229,7 @@ public class KLClient {
             if (mKLWebSocket.sendData(jsonObject.toString())) {
                 KLLog.e("SendJoin ok");
                 long nStartTime = System.currentTimeMillis();
-                while (System.currentTimeMillis() - nStartTime < 5000) {
+                while (System.currentTimeMillis() - nStartTime < 15000) {
                     if (nRespOK == 0) {
                         mSocketLock.unlock();
                         return false;
@@ -248,8 +251,6 @@ public class KLClient {
             } else {
                 KLLog.e("SendJoin fail");
             }
-            mSocketLock.unlock();
-            return false;
         } catch (JSONException e) {
             e.printStackTrace();
         }
@@ -270,13 +271,16 @@ public class KLClient {
         if (bClose || !bConnect) {
             return;
         }
-        if (mKLEngine != null && mKLEngine.strRid.equals("")) {
+        if (mKLEngine == null) {
+            return;
+        }
+        if (mKLEngine.strRid.equals("")) {
             return;
         }
 
         mSocketLock.lock();
         try {
-            nCount = new Random().nextInt(9000000) + 1000000;
+            int nCount = new Random().nextInt(9000000) + 1000000;
 
             JSONObject jsonData = new JSONObject();
             jsonData.put("rid", mKLEngine.strRid);
@@ -305,18 +309,20 @@ public class KLClient {
       }
     */
     // 发送心跳
-    public boolean SendAlive() {
+    public void SendAlive() {
         if (bClose || !bConnect) {
-            return false;
+            return;
         }
-        if (mKLEngine != null && mKLEngine.strRid.equals("")) {
-            return false;
+        if (mKLEngine == null) {
+            return;
+        }
+        if (mKLEngine.strRid.equals("")) {
+            return;
         }
 
         mSocketLock.lock();
         try {
-            nCount = new Random().nextInt(9000000) + 1000000;
-            nIndex = nCount;
+            int nCount = new Random().nextInt(9000000) + 1000000;
 
             JSONObject jsonData = new JSONObject();
             jsonData.put("rid", mKLEngine.strRid);
@@ -329,41 +335,11 @@ public class KLClient {
             KLLog.e("SendAlive = " + jsonObject);
 
             // 发送数据
-            nRespOK = -1;
-            bRespResult = false;
-            nType = SEND_BIZ_KEEP;
-            if (mKLWebSocket.sendData(jsonObject.toString())) {
-                KLLog.e("SendAlive ok");
-                long nStartTime = System.currentTimeMillis();
-                while (System.currentTimeMillis() - nStartTime < 5000) {
-                    if (nRespOK == 0) {
-                        mSocketLock.unlock();
-                        return false;
-                    }
-                    if (nRespOK == 1) {
-                        if (bRespResult) {
-                            KLLog.e("SendAlive ok2");
-                            mSocketLock.unlock();
-                            return true;
-                        } else {
-                            try {
-                                Thread.sleep(100);
-                            } catch (InterruptedException e) {
-                                e.printStackTrace();
-                            }
-                        }
-                    }
-                }
-            } else {
-                KLLog.e("SendAlive fail");
-            }
-            mSocketLock.unlock();
-            return false;
+            mKLWebSocket.sendData(jsonObject.toString());
         } catch (JSONException e) {
             e.printStackTrace();
         }
         mSocketLock.unlock();
-        return false;
     }
 
     /*
@@ -385,13 +361,16 @@ public class KLClient {
         if (bClose || !bConnect) {
             return false;
         }
-        if (mKLEngine != null && mKLEngine.strRid.equals("")) {
+        if (mKLEngine == null) {
+            return false;
+        }
+        if (mKLEngine.strRid.equals("")) {
             return false;
         }
 
         mSocketLock.lock();
         try {
-            nCount = new Random().nextInt(9000000) + 1000000;
+            int nCount = new Random().nextInt(9000000) + 1000000;
             nIndex = nCount;
 
             JSONObject jsonJsep = new JSONObject();
@@ -422,7 +401,7 @@ public class KLClient {
             if (mKLWebSocket.sendData(jsonObject.toString())) {
                 KLLog.e("SendPublish ok");
                 long nStartTime = System.currentTimeMillis();
-                while (System.currentTimeMillis() - nStartTime < 5000) {
+                while (System.currentTimeMillis() - nStartTime < 15000) {
                     if (nRespOK == 0) {
                         mSocketLock.unlock();
                         return false;
@@ -444,8 +423,6 @@ public class KLClient {
             } else {
                 KLLog.e("SendPublish fail");
             }
-            mSocketLock.unlock();
-            return false;
         } catch (JSONException e) {
             e.printStackTrace();
         }
@@ -468,13 +445,16 @@ public class KLClient {
         if (bClose || !bConnect) {
             return;
         }
-        if (mKLEngine != null && mKLEngine.strRid.equals("")) {
+        if (mKLEngine == null) {
+            return;
+        }
+        if (mKLEngine.strRid.equals("")) {
             return;
         }
 
         mSocketLock.lock();
         try {
-            nCount = new Random().nextInt(9000000) + 1000000;
+            int nCount = new Random().nextInt(9000000) + 1000000;
 
             JSONObject jsonData = new JSONObject();
             jsonData.put("rid", mKLEngine.strRid);
@@ -514,13 +494,16 @@ public class KLClient {
         if (bClose || !bConnect) {
             return false;
         }
-        if (mKLEngine != null && mKLEngine.strRid.equals("")) {
+        if (mKLEngine == null) {
+            return false;
+        }
+        if (mKLEngine.strRid.equals("")) {
             return false;
         }
 
         mSocketLock.lock();
         try {
-            nCount = new Random().nextInt(9000000) + 1000000;
+            int nCount = new Random().nextInt(9000000) + 1000000;
             nIndex = nCount;
 
             JSONObject jsonJsep = new JSONObject();
@@ -549,7 +532,7 @@ public class KLClient {
             if (mKLWebSocket.sendData(jsonObject.toString())) {
                 KLLog.e("SendSubscribe ok");
                 long nStartTime = System.currentTimeMillis();
-                while (System.currentTimeMillis() - nStartTime < 5000) {
+                while (System.currentTimeMillis() - nStartTime < 15000) {
                     if (nRespOK == 0) {
                         mSocketLock.unlock();
                         return false;
@@ -571,8 +554,6 @@ public class KLClient {
             } else {
                 KLLog.e("SendSubscribe fail");
             }
-            mSocketLock.unlock();
-            return false;
         } catch (JSONException e) {
             e.printStackTrace();
         }
@@ -596,13 +577,16 @@ public class KLClient {
         if (bClose || !bConnect) {
             return;
         }
-        if (mKLEngine != null && mKLEngine.strRid.equals("")) {
+        if (mKLEngine == null) {
+            return;
+        }
+        if (mKLEngine.strRid.equals("")) {
             return;
         }
 
         mSocketLock.lock();
         try {
-            nCount = new Random().nextInt(9000000) + 1000000;
+            int nCount = new Random().nextInt(9000000) + 1000000;
 
             JSONObject jsonData = new JSONObject();
             jsonData.put("rid", mKLEngine.strRid);
