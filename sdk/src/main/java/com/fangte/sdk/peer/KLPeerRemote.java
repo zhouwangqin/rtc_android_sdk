@@ -7,6 +7,7 @@ import com.fangte.sdk.util.KLLog;
 import org.webrtc.CandidatePairChangeEvent;
 import org.webrtc.DataChannel;
 import org.webrtc.IceCandidate;
+import org.webrtc.JavaI420Buffer;
 import org.webrtc.MediaConstraints;
 import org.webrtc.MediaStream;
 import org.webrtc.MediaStreamTrack;
@@ -18,6 +19,7 @@ import org.webrtc.SessionDescription;
 import org.webrtc.VideoFrame;
 import org.webrtc.VideoSink;
 import org.webrtc.VideoTrack;
+import org.webrtc.YuvHelper;
 
 import java.nio.ByteBuffer;
 
@@ -64,21 +66,25 @@ public class KLPeerRemote {
                     if (frame.getBuffer() != null) {
                         VideoFrame.I420Buffer i420Buffer = frame.getBuffer().toI420();
                         if (i420Buffer != null) {
-                            int nYlen = i420Buffer.getWidth() * i420Buffer.getHeight();
-                            int nUlen = i420Buffer.getWidth() * i420Buffer.getHeight() / 4;
-                            int nVlen = i420Buffer.getWidth() * i420Buffer.getHeight() / 4;
+                            int nWidth = i420Buffer.getWidth();
+                            int nHeight = i420Buffer.getHeight();
+                            ByteBuffer dst = ByteBuffer.allocateDirect(nWidth * nHeight * 3 / 2);
+
+                            YuvHelper.I420Copy(i420Buffer.getDataY(), i420Buffer.getStrideY(),
+                                    i420Buffer.getDataU(), i420Buffer.getStrideU(),
+                                    i420Buffer.getDataV(), i420Buffer.getStrideV(), dst, nWidth, nHeight);
+
+                            int nYlen = nWidth * nHeight;
+                            int nUlen = nWidth * nHeight / 4;
+                            int nVlen = nWidth * nHeight / 4;
                             byte[] ybytes = new byte[nYlen];
                             byte[] ubytes = new byte[nUlen];
                             byte[] vbytes = new byte[nVlen];
-                            if (i420Buffer.getDataY() != null) {
-                                i420Buffer.getDataY().get(ybytes);
-                            }
-                            if (i420Buffer.getDataU() != null) {
-                                i420Buffer.getDataU().get(ubytes);
-                            }
-                            if (i420Buffer.getDataV() != null) {
-                                i420Buffer.getDataV().get(vbytes);
-                            }
+
+                            dst.position(0);
+                            dst.get(ybytes);
+                            dst.get(ubytes);
+                            dst.get(vbytes);
 
                             klPeerRemote.klFrame.uid = klPeerRemote.strUid;
                             klPeerRemote.klFrame.video_type = 1;
