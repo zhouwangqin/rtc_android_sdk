@@ -1,5 +1,8 @@
 package com.fangte.sdk;
 
+/*
+    KLSdk sdk对外接口类
+ */
 public class KLSdk {
     // sdk对象
     private final KLEngine mKLEngine = new KLEngine();
@@ -34,9 +37,29 @@ public class KLSdk {
         mKLEngine.LeaveRoom();
     }
 
-    // 设置是否推流
+    // 设置是否启动音频推流
     public void setPublish(boolean bPub) {
         mKLEngine.setPublish(bPub);
+    }
+
+    // 设置是否启动视频
+    public void setCamera(boolean bPub) {
+        mKLEngine.setCamera(bPub);
+    }
+
+    // 设置是否启动视频推流
+    public void setCameraPub(boolean bPub) {
+        mKLEngine.setCameraPub(bPub);
+    }
+
+    // 设置空间音效开关
+    public void setAudioLive(boolean bAudio) {
+        mKLEngine.setAudioLive(bAudio);
+    }
+
+    // 切换前后摄像头
+    public void switchCapture(boolean bSwitch) {
+        mKLEngine.switchCapture(bSwitch);
     }
 
     // 设置麦克风

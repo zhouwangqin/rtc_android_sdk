@@ -1,5 +1,8 @@
 package com.fangte.sdk;
 
+/*
+    KLFrame 视频帧数据yuv420
+ */
 public class KLFrame {
     public String uid;
     public int video_type;

@@ -75,7 +75,6 @@ public class KLPeerLocal {
         // 创建PeerConnect对象
         PeerConnection.RTCConfiguration rtcConfig = new PeerConnection.RTCConfiguration(mKLEngine.iceServers);
         rtcConfig.disableIpv6 = true;
-        rtcConfig.enableDtlsSrtp = true;
         rtcConfig.bundlePolicy = PeerConnection.BundlePolicy.MAXBUNDLE;
         rtcConfig.sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN;
         rtcConfig.tcpCandidatePolicy = PeerConnection.TcpCandidatePolicy.DISABLED;
@@ -137,7 +136,7 @@ public class KLPeerLocal {
         }
         new Thread(() -> {
             if (mKLEngine != null && mKLEngine.mKLClient != null && sdp != null) {
-                if (mKLEngine.mKLClient.SendPublish(sdp.description, true, false, 0)) {
+                if (mKLEngine.mKLClient.SendPublish(sdp.description, true, false, 0, 0)) {
                     nLive = 2;
                     // 处理返回
                     strMid = mKLEngine.mKLClient.strMid;

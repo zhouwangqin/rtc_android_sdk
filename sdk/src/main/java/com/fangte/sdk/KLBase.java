@@ -13,10 +13,10 @@ public class KLBase {
     public static final int SEND_BIZ_SUB = 10015;
 
     // 信令服务器地址
-    static String SERVER_IP = "120.238.78.213";
-    static int SERVER_PORT = 10443;
+    static String SERVER_IP = "49.235.93.74";
+    static int SERVER_PORT = 8443;
     // 转发服务器地址
-    static String RELAY_SERVER_IP = "120.238.78.214";
+    static String RELAY_SERVER_IP = "121.4.240.130";
 
     // Track参数
     public static final String VIDEO_TRACK_ID = "ARDAMSv0";

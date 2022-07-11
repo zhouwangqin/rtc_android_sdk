@@ -1,13 +1,15 @@
 package com.fangte.sdk.peer;
 
+import com.fangte.sdk.KLAudio;
 import com.fangte.sdk.KLEngine;
 import com.fangte.sdk.KLFrame;
 import com.fangte.sdk.util.KLLog;
 
+import org.webrtc.AudioSink;
+import org.webrtc.AudioTrack;
 import org.webrtc.CandidatePairChangeEvent;
 import org.webrtc.DataChannel;
 import org.webrtc.IceCandidate;
-import org.webrtc.JavaI420Buffer;
 import org.webrtc.MediaConstraints;
 import org.webrtc.MediaStream;
 import org.webrtc.MediaStreamTrack;
@@ -31,6 +33,8 @@ public class KLPeerRemote {
     public String strMid = "";
     public String sfuId = "";
     public String strSid = "";
+    public int audio_type = 0;
+    public int video_type = 0;
     // 上层对象
     public KLEngine mKLEngine = null;
 
@@ -51,6 +55,32 @@ public class KLPeerRemote {
     private PeerConnection mPeerConnection = null;
     // sdp media 对象
     private MediaConstraints sdpMediaConstraints = null;
+
+    // 本地音频处理
+    private final KLAudio klAudio = new KLAudio();
+    private final ProxyAudioSink audioProxy = new ProxyAudioSink();
+    private static class ProxyAudioSink implements AudioSink {
+        public KLPeerRemote klPeerRemote = null;
+
+        @Override
+        public void onFrame(byte[] data, int bits, int samples, int channels, int frames) {
+            if (klPeerRemote != null && klPeerRemote.mKLEngine != null && klPeerRemote.mKLEngine.mKLListen != null) {
+                if (frames > 0) {
+                    klPeerRemote.klAudio.uid = klPeerRemote.strUid;
+                    klPeerRemote.klAudio.audio_type = klPeerRemote.audio_type;
+                    klPeerRemote.klAudio.bits = bits;
+                    klPeerRemote.klAudio.samples = samples;
+                    klPeerRemote.klAudio.channels = channels;
+                    klPeerRemote.klAudio.frames = frames;
+                    int len = bits / 8 * channels * frames;
+                    klPeerRemote.klAudio.data = new byte[len];
+                    System.arraycopy(data, 0, klPeerRemote.klAudio.data, 0, len);
+
+                    klPeerRemote.mKLEngine.mKLListen.OnRemoteAudio(klPeerRemote.klAudio);
+                }
+            }
+        }
+    }
 
     // 本地渲染处理
     private final KLFrame klFrame = new KLFrame();
@@ -87,7 +117,7 @@ public class KLPeerRemote {
                             dst.get(vbytes);
 
                             klPeerRemote.klFrame.uid = klPeerRemote.strUid;
-                            klPeerRemote.klFrame.video_type = 1;
+                            klPeerRemote.klFrame.video_type = klPeerRemote.video_type;
                             klPeerRemote.klFrame.sy = i420Buffer.getStrideY();
                             klPeerRemote.klFrame.su = i420Buffer.getStrideU();
                             klPeerRemote.klFrame.sv = i420Buffer.getStrideV();
@@ -107,6 +137,17 @@ public class KLPeerRemote {
                 }
             }
         }
+    }
+
+    // 返回远端音频Track
+    private AudioTrack getRemoteAudioTrack() {
+        for (RtpTransceiver transceiver : mPeerConnection.getTransceivers()) {
+            MediaStreamTrack track = transceiver.getReceiver().track();
+            if (track instanceof AudioTrack) {
+                return (AudioTrack) track;
+            }
+        }
+        return null;
     }
 
     // 返回远端视频Track
@@ -141,7 +182,6 @@ public class KLPeerRemote {
         // 创建PeerConnect对象
         PeerConnection.RTCConfiguration rtcConfig = new PeerConnection.RTCConfiguration(mKLEngine.iceServers);
         rtcConfig.disableIpv6 = true;
-        rtcConfig.enableDtlsSrtp = true;
         rtcConfig.bundlePolicy = PeerConnection.BundlePolicy.MAXBUNDLE;
         rtcConfig.sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN;
         rtcConfig.tcpCandidatePolicy = PeerConnection.TcpCandidatePolicy.DISABLED;
@@ -153,6 +193,7 @@ public class KLPeerRemote {
             mPeerConnection.addTransceiver(MediaStreamTrack.MediaType.MEDIA_TYPE_AUDIO, init);
             mPeerConnection.addTransceiver(MediaStreamTrack.MediaType.MEDIA_TYPE_VIDEO, init);
             videoProxy.klPeerRemote = this;
+            audioProxy.klPeerRemote = this;
         }
         // 状态赋值
         nLive = 1;
@@ -371,6 +412,13 @@ public class KLPeerRemote {
             if (mVideoTrack != null) {
                 mKLEngine.WriteDebugLog("增加视频帧回调 = " + strMid);
                 mVideoTrack.addSink(videoProxy);
+            }
+
+            AudioTrack mAudioTrack = getRemoteAudioTrack();
+            if (mAudioTrack != null) {
+                mKLEngine.WriteDebugLog("增加音频帧回调 = " + strMid);
+                mAudioTrack.addSink(audioProxy);
+                mAudioTrack.setEnabled(!mKLEngine.bAudioLive);
             }
         }
 

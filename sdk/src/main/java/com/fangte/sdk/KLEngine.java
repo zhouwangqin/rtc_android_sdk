@@ -5,6 +5,7 @@ import android.os.Handler;
 import android.os.Looper;
 
 import com.fangte.sdk.audio.AppRTCAudioManager;
+import com.fangte.sdk.peer.KLPeerCamera;
 import com.fangte.sdk.peer.KLPeerLocal;
 import com.fangte.sdk.peer.KLPeerRemote;
 import com.fangte.sdk.util.KLLog;
@@ -13,9 +14,9 @@ import com.fangte.sdk.ws.KLClient;
 import org.json.JSONException;
 import org.json.JSONObject;
 import org.webrtc.CallSessionFileRotatingLogSink;
+import org.webrtc.DefaultVideoDecoderFactory;
+import org.webrtc.DefaultVideoEncoderFactory;
 import org.webrtc.EglBase;
-import org.webrtc.HardwareVideoDecoderFactory;
-import org.webrtc.HardwareVideoEncoderFactory;
 import org.webrtc.PeerConnection;
 import org.webrtc.PeerConnectionFactory;
 import org.webrtc.VideoDecoderFactory;
@@ -42,15 +43,19 @@ public class KLEngine {
     public String strUid = "";
     public String strUrl = "";
     // 上下文对象
-    private Activity mContext = null;
+    public Activity mContext = null;
     private Handler mHandler = null;
     // 回调对象
     public KLListen mKLListen = null;
 
     // 标记
     private int mStatus = 0;
-    private boolean bPublish = true;
     private boolean bRoomClose = false;
+
+    private boolean bPublish = true;
+    public boolean bCamera = false;
+    public boolean bCameraPub = true;
+    public boolean bAudioLive = false;
 
     // 音频设备管理
     private AppRTCAudioManager audioManager = null;
@@ -66,8 +71,10 @@ public class KLEngine {
 
     // 信令对象
     public KLClient mKLClient = new KLClient();
-    // 推流对象
+    // 音频推流对象
     private final KLPeerLocal klPeerLocal = new KLPeerLocal();
+    // 视频推流对象
+    private final KLPeerCamera klPeerCamera = new KLPeerCamera();
     // 拉流对象
     private final HashMap<String, KLPeerRemote> klPeerRemoteHashMap = new HashMap<>();
     private final ReentrantLock mMapLock = new ReentrantLock();
@@ -160,14 +167,41 @@ public class KLEngine {
                 if (bPublish) {
                     if (klPeerLocal.nLive == 0) {
                         WriteDebugLog("启动音频推流");
-                        Publish();
+                        mMapLock.lock();
+                        klPeerLocal.startPublish();
+                        mMapLock.unlock();
                     }
                 } else {
-                    UnPublish();
+                    mMapLock.lock();
+                    klPeerLocal.stopPublish();
+                    mMapLock.unlock();
                 }
 
                 if (bWorkExit || bRoomClose) {
                     WriteDebugLog("退出工作线程2");
+                    return;
+                }
+
+                // 判断视频推流
+                if (bCamera)
+                {
+                    if (klPeerCamera.nLive == 0)
+                    {
+                        WriteDebugLog("启动视频推流");
+                        mMapLock.lock();
+                        klPeerCamera.startPublish();
+                        mMapLock.unlock();
+                    }
+                }
+                else
+                {
+                    mMapLock.lock();
+                    klPeerCamera.stopPublish();
+                    mMapLock.unlock();
+                }
+
+                if (bWorkExit || bRoomClose) {
+                    WriteDebugLog("退出工作线程3");
                     return;
                 }
 
@@ -182,7 +216,7 @@ public class KLEngine {
                     }
 
                     if (bWorkExit || bRoomClose) {
-                        WriteDebugLog("退出工作线程3");
+                        WriteDebugLog("退出工作线程4");
                         mMapLock.unlock();
                         return;
                     }
@@ -190,10 +224,22 @@ public class KLEngine {
                 mMapLock.unlock();
             } else {
                 WriteDebugLog("停止音频推流");
-                UnPublish();
+                mMapLock.lock();
+                klPeerLocal.stopPublish();
+                mMapLock.unlock();
 
                 if (bWorkExit || bRoomClose) {
-                    WriteDebugLog("退出工作线程4");
+                    WriteDebugLog("退出工作线程5");
+                    return;
+                }
+
+                WriteDebugLog("停止视频推流");
+                mMapLock.lock();
+                klPeerCamera.stopPublish();
+                mMapLock.unlock();
+
+                if (bWorkExit || bRoomClose) {
+                    WriteDebugLog("退出工作线程6");
                     return;
                 }
 
@@ -206,7 +252,7 @@ public class KLEngine {
                     }
 
                     if (bWorkExit || bRoomClose) {
-                        WriteDebugLog("退出工作线程5");
+                        WriteDebugLog("退出工作线程7");
                         mMapLock.unlock();
                         return;
                     }
@@ -217,7 +263,7 @@ public class KLEngine {
 
             for (int i = 0; i < 10; i++) {
                 if (bWorkExit || bRoomClose) {
-                    WriteDebugLog("退出工作线程6");
+                    WriteDebugLog("退出工作线程8");
                     return;
                 }
                 try {
@@ -241,9 +287,35 @@ public class KLEngine {
         mKLListen = listen;
     }
 
-    // 设置是否推流
+    // 设置是否启动音频推流
     public void setPublish(boolean bPub) {
         bPublish = bPub;
+    }
+
+    // 设置是否启动视频
+    public void setCamera(boolean bPub) {
+        bCamera = bPub;
+    }
+
+    // 设置是否启动视频推流
+    public void setCameraPub(boolean bPub) {
+        if (bCameraPub == bPub) {
+            return;
+        }
+        bCameraPub = bPub;
+        mMapLock.lock();
+        klPeerCamera.stopPublish();
+        mMapLock.unlock();
+    }
+
+    // 设置空间音效开关
+    public void setAudioLive(boolean bAudio) {
+        bAudioLive = bAudio;
+    }
+
+    // 切换前后摄像头
+    public void switchCapture(boolean bSwitch) {
+        klPeerCamera.switchCapture(bSwitch);
     }
 
     // 初始化
@@ -258,6 +330,8 @@ public class KLEngine {
         mKLClient.mKLEngine = this;
         klPeerLocal.strUid = strUid;
         klPeerLocal.mKLEngine = this;
+        klPeerCamera.strUid = strUid;
+        klPeerCamera.mKLEngine = this;
         // 初始化RTC
         mEglBase = EglBase.create();
         initPeerConnectionFactory();
@@ -351,8 +425,14 @@ public class KLEngine {
         bWorkExit = true;
         WriteDebugLog("停止所有拉流");
         FreeAllSubscribe();
+
+        mMapLock.lock();
+        WriteDebugLog("停止视频推流");
+        klPeerCamera.stopPublish();
         WriteDebugLog("停止音频推流");
-        UnPublish();
+        klPeerLocal.stopPublish();
+        mMapLock.unlock();
+
         WriteDebugLog("停止socket连接");
         CountDownLatch mLatch = new CountDownLatch(1);
         new Thread(() -> {
@@ -368,22 +448,8 @@ public class KLEngine {
         strRid = "";
     }
 
-    // 启动推流
-    private void Publish() {
-        mMapLock.lock();
-        klPeerLocal.startPublish();
-        mMapLock.unlock();
-    }
-
-    // 停止推流
-    private void UnPublish() {
-        mMapLock.lock();
-        klPeerLocal.stopPublish();
-        mMapLock.unlock();
-    }
-
     // 增加拉流
-    private void Subscribe(String uid, String mid, String sfuId) {
+    private void Subscribe(String uid, String mid, String sfuId, int audio_type, int video_type) {
         mMapLock.lock();
         if (!klPeerRemoteHashMap.containsKey(mid)) {
             KLPeerRemote klPeerRemote = new KLPeerRemote();
@@ -391,6 +457,8 @@ public class KLEngine {
             klPeerRemote.strMid = mid;
             klPeerRemote.sfuId = sfuId;
             klPeerRemote.mKLEngine = this;
+            klPeerRemote.audio_type = audio_type;
+            klPeerRemote.video_type = video_type;
             klPeerRemoteHashMap.put(mid, klPeerRemote);
         }
         mMapLock.unlock();
@@ -535,7 +603,6 @@ public class KLEngine {
         freePeerConnectFactory();
         String fieldTrials = "";
         fieldTrials += VIDEO_VP8_INTEL_HW_ENCODER_FIELDTRIAL;
-        //fieldTrials += VIDEO_FLEXFEC_FIELDTRIAL;
         PeerConnectionFactory.InitializationOptions.Builder mOptionsBuilder = PeerConnectionFactory.InitializationOptions.builder(mContext);
         mOptionsBuilder.setFieldTrials(fieldTrials);
         mOptionsBuilder.setEnableInternalTracer(false);
@@ -548,8 +615,8 @@ public class KLEngine {
         PeerConnectionFactory.Builder mBuilder = PeerConnectionFactory.builder();
         mBuilder.setOptions(mOptions);
         mBuilder.setAudioDeviceModule(mAudioDeviceModule);
-        VideoEncoderFactory mVideoEncoderFactory = new HardwareVideoEncoderFactory(mEglBase.getEglBaseContext(), true, false);
-        VideoDecoderFactory mVideoDecoderFactory = new HardwareVideoDecoderFactory(mEglBase.getEglBaseContext());
+        VideoEncoderFactory mVideoEncoderFactory = new DefaultVideoEncoderFactory(mEglBase.getEglBaseContext(), true, false);
+        VideoDecoderFactory mVideoDecoderFactory = new DefaultVideoDecoderFactory(mEglBase.getEglBaseContext());
         mBuilder.setVideoEncoderFactory(mVideoEncoderFactory);
         mBuilder.setVideoDecoderFactory(mVideoDecoderFactory);
         mPeerConnectionFactory = mBuilder.createPeerConnectionFactory();
@@ -668,6 +735,8 @@ public class KLEngine {
             String strUid = "";
             String strMid = "";
             String strSfu = "";
+            int audio_type = 0;
+            int video_type = 0;
             if (jsonObject.has("uid")) {
                 strUid = jsonObject.getString("uid");
             }
@@ -677,7 +746,16 @@ public class KLEngine {
             if (jsonObject.has("sfuid")) {
                 strSfu = jsonObject.getString("sfuid");
             }
-            Subscribe(strUid, strMid, strSfu);
+            if (jsonObject.has("minfo")) {
+                JSONObject jsonMInfo = jsonObject.getJSONObject("minfo");
+                if (jsonMInfo.has("audiotype")) {
+                    audio_type = jsonMInfo.getInt("audiotype");
+                }
+                if (jsonMInfo.has("videotype")) {
+                    video_type = jsonMInfo.getInt("videotype");
+                }
+            }
+            Subscribe(strUid, strMid, strSfu, audio_type, video_type);
         } catch (JSONException e) {
             e.printStackTrace();
         }

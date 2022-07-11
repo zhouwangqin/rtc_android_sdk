@@ -352,12 +352,13 @@ public class KLClient {
         "minfo":{
             "audio":true,
             "video":true,
-            "videotype":0
+            "audiotype":0,
+		    "videotype":0,
         }
       }
     */
     // 发布流
-    public boolean SendPublish(String sdp, boolean bAudio, boolean bVideo, int videoType) {
+    public boolean SendPublish(String sdp, boolean bAudio, boolean bVideo, int audiotype, int videoType) {
         if (bClose || !bConnect) {
             return false;
         }
@@ -380,6 +381,7 @@ public class KLClient {
             JSONObject jsonMinfo = new JSONObject();
             jsonMinfo.put("audio", bAudio);
             jsonMinfo.put("video", bVideo);
+            jsonMinfo.put("audiotype", audiotype);
             jsonMinfo.put("videotype", videoType);
 
             JSONObject jsonData = new JSONObject();
