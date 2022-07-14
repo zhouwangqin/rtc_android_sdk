@@ -11,4 +11,5 @@ public class KLAudio {
     public int samples;
     public int channels;
     public int frames;
+    public double audioLevel;
 }

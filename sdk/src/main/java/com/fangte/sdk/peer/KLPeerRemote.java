@@ -63,7 +63,7 @@ public class KLPeerRemote {
         public KLPeerRemote klPeerRemote = null;
 
         @Override
-        public void onFrame(byte[] data, int bits, int samples, int channels, int frames) {
+        public void onFrame(byte[] data, int bits, int samples, int channels, int frames, double audioLevel) {
             if (klPeerRemote != null && klPeerRemote.mKLEngine != null && klPeerRemote.mKLEngine.mKLListen != null) {
                 if (frames > 0) {
                     klPeerRemote.klAudio.uid = klPeerRemote.strUid;
@@ -72,6 +72,7 @@ public class KLPeerRemote {
                     klPeerRemote.klAudio.samples = samples;
                     klPeerRemote.klAudio.channels = channels;
                     klPeerRemote.klAudio.frames = frames;
+                    klPeerRemote.klAudio.audioLevel = audioLevel;
                     int len = bits / 8 * channels * frames;
                     klPeerRemote.klAudio.data = new byte[len];
                     System.arraycopy(data, 0, klPeerRemote.klAudio.data, 0, len);
@@ -140,7 +141,7 @@ public class KLPeerRemote {
     }
 
     // 返回远端音频Track
-    private AudioTrack getRemoteAudioTrack() {
+    public AudioTrack getRemoteAudioTrack() {
         for (RtpTransceiver transceiver : mPeerConnection.getTransceivers()) {
             MediaStreamTrack track = transceiver.getReceiver().track();
             if (track instanceof AudioTrack) {

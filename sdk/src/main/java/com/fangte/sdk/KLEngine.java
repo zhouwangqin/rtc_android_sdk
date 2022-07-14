@@ -13,6 +13,7 @@ import com.fangte.sdk.ws.KLClient;
 
 import org.json.JSONException;
 import org.json.JSONObject;
+import org.webrtc.AudioTrack;
 import org.webrtc.CallSessionFileRotatingLogSink;
 import org.webrtc.DefaultVideoDecoderFactory;
 import org.webrtc.DefaultVideoEncoderFactory;
@@ -311,6 +312,17 @@ public class KLEngine {
     // 设置空间音效开关
     public void setAudioLive(boolean bAudio) {
         bAudioLive = bAudio;
+        mMapLock.lock();
+        for (Map.Entry<String, KLPeerRemote> remote : klPeerRemoteHashMap.entrySet()) {
+            KLPeerRemote klPeerRemote = remote.getValue();
+            if (klPeerRemote != null) {
+                AudioTrack audioTrack = klPeerRemote.getRemoteAudioTrack();
+                if (audioTrack != null) {
+                    audioTrack.setEnabled(!bAudioLive);
+                }
+            }
+        }
+        mMapLock.unlock();
     }
 
     // 切换前后摄像头
